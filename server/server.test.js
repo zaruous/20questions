@@ -151,6 +151,33 @@ describe('WebSocket 서버 (고정 3개 방)', () => {
     [a, b, c].forEach((client) => client.close());
   });
 
+  it('방장이 대기실에서 첫 출제자를 지정하면 그 사람부터 시작한다', async () => {
+    const host = await connect();
+    const b = await connect();
+    const c = await connect();
+    for (const [client, name] of [[host, '방장'], [b, '비'], [c, '씨']]) {
+      client.send({ type: 'join', code: '2', name });
+    }
+    await c.wait((m) => m.type === 'state' && m.state.players.length === 3);
+    const idOf = (name) => host.latest().players.find((p) => p.name === name).id;
+
+    // 방장이 아닌 사람은 지정할 수 없다
+    b.send({ type: 'pickFirst', playerId: idOf('씨') });
+    await b.wait((m) => m.type === 'error' && m.message.includes('방장'));
+
+    // 방장이 지정하면 모두의 화면에 반영된다
+    host.send({ type: 'pickFirst', playerId: idOf('씨') });
+    await b.wait((m) => m.type === 'state' && m.state.firstAnswererId === idOf('씨'));
+
+    host.send({ type: 'start' });
+    const view = (await b.wait(isState('secret'))).state;
+    expect(view.answererId).toBe(idOf('씨'));
+    expect(view.round).toBe(1);
+    expect(view.totalRounds).toBe(3);
+
+    [host, b, c].forEach((client) => client.close());
+  });
+
   it('끊긴 플레이어가 같은 토큰으로 돌아온다', async () => {
     const a = await connect();
     const b = await connect();

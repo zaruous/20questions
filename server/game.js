@@ -30,6 +30,7 @@ export function createRoom(code, name = `${code}번 방`, now = Date.now()) {
     createdAt: now,
     phase: 'lobby', // lobby | secret | asking | roundEnd | gameEnd
     hostId: null,
+    firstAnswererId: null, // 대기실에서 방장이 지정한 첫 출제자. null이면 입장 순서대로
     players: [], // { id, name, score, connected }
     roster: [], // 게임 시작 시 확정된 출제 순서(플레이어 id)
     roundIndex: -1,
@@ -86,6 +87,7 @@ export function disconnect(room, id, now = Date.now()) {
     // 대기실에서는 자리를 잡아둘 이유가 없다.
     room.players = room.players.filter((p) => p.id !== id);
     room.roster = room.roster.filter((pid) => pid !== id);
+    if (room.firstAnswererId === id) room.firstAnswererId = null; // 고른 사람이 나갔으면 해제
   } else {
     player.connected = false;
   }
@@ -105,13 +107,33 @@ export function disconnect(room, id, now = Date.now()) {
   return ok();
 }
 
+/**
+ * 대기실에서 방장이 첫 출제자를 지정한다. targetId가 없으면 입장 순서대로 되돌린다.
+ * 출제자는 매 라운드 돌아가므로, 첫 사람을 정하는 것이 곧 순서를 정하는 것이다.
+ */
+export function pickFirstAnswerer(room, byId, targetId) {
+  if (room.phase !== 'lobby') return err('대기실에서만 첫 출제자를 정할 수 있습니다.');
+  if (byId !== room.hostId) return err('방장만 첫 출제자를 정할 수 있습니다.');
+  if (targetId == null) {
+    room.firstAnswererId = null;
+    return ok();
+  }
+  if (!findPlayer(room, targetId)?.connected) return err('방에 있는 사람 중에서 골라주세요.');
+  room.firstAnswererId = targetId;
+  return ok();
+}
+
 export function startGame(room, byId, now = Date.now()) {
   if (room.phase !== 'lobby') return err('대기실에서만 시작할 수 있습니다.');
   if (byId !== room.hostId) return err('방장만 게임을 시작할 수 있습니다.');
   const players = connectedPlayers(room);
   if (players.length < MIN_PLAYERS) return err(`${MIN_PLAYERS}명 이상 모여야 시작할 수 있습니다.`);
 
-  room.roster = players.map((p) => p.id);
+  // 지정된 첫 출제자가 있으면 그 사람부터 시작하도록 입장 순서를 돌린다.
+  // (지정이 없거나 이미 맨 앞이면 at <= 0 이라 입장 순서 그대로)
+  const ids = players.map((p) => p.id);
+  const at = ids.indexOf(room.firstAnswererId);
+  room.roster = at > 0 ? [...ids.slice(at), ...ids.slice(0, at)] : ids;
   room.players.forEach((p) => {
     p.score = 0;
   });
@@ -249,6 +271,7 @@ export function restart(room, byId) {
   // 끊긴 채 남아 있던 좌석 정리
   room.players = room.players.filter((p) => p.connected);
   if (!findPlayer(room, room.hostId)) room.hostId = room.players[0]?.id ?? null;
+  if (!findPlayer(room, room.firstAnswererId)) room.firstAnswererId = null;
   return ok();
 }
 
@@ -305,6 +328,7 @@ export function viewFor(room, playerId) {
     phase: room.phase,
     you: playerId,
     hostId: room.hostId,
+    firstAnswererId: room.firstAnswererId,
     answererId: room.answererId,
     players: room.players.map((p) => ({
       id: p.id,
