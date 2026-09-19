@@ -62,6 +62,9 @@ function handle(ws, session, msg) {
 
   let result;
   switch (msg.type) {
+    case 'pickFirst':
+      result = game.pickFirstAnswerer(room, me, msg.playerId ?? null);
+      break;
     case 'start':
       result = game.startGame(room, me, now);
       break;

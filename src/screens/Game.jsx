@@ -133,19 +133,59 @@ export default function Game({ state, send, leaveRoom, serverNow }) {
   );
 }
 
+/** 지정한 사람부터 시작하도록 입장 순서를 돌린 결과. 서버 startGame과 같은 규칙(표시용). */
+function turnOrder(players, firstId) {
+  const at = players.findIndex((p) => p.id === firstId);
+  return at > 0 ? [...players.slice(at), ...players.slice(0, at)] : players;
+}
+
 function Lobby({ state, isHost, send }) {
-  const connected = state.players.filter((p) => p.connected).length;
+  const players = state.players.filter((p) => p.connected);
+  const picked = players.find((p) => p.id === state.firstAnswererId) ?? null;
+  const label = (p) => (p.id === state.you ? `${p.name} (나)` : p.name);
+  const pick = (playerId) => send({ type: 'pickFirst', playerId });
+
   return (
     <div className="lobby">
       <h2>친구에게 몇 번 방인지 알려주세요</h2>
       <p className="lobby__code">{state.name}</p>
       <p className="hint">
-        {connected}명 참가 중 · {state.limits.minPlayers}명부터 시작할 수 있습니다 (최대 {state.limits.maxPlayers}명)
+        {players.length}명 참가 중 · {state.limits.minPlayers}명부터 시작할 수 있습니다 (최대 {state.limits.maxPlayers}명)
       </p>
+
+      <section className="first-pick">
+        <h3>🎩 첫 출제자</h3>
+        {isHost ? (
+          <ul>
+            <li>
+              <label>
+                <input type="radio" name="firstAnswerer" checked={!picked} onChange={() => pick(null)} />
+                <span>입장한 순서대로</span>
+              </label>
+            </li>
+            {players.map((p) => (
+              <li key={p.id}>
+                <label>
+                  <input type="radio" name="firstAnswerer" checked={picked?.id === p.id} onChange={() => pick(p.id)} />
+                  <span>{label(p)}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="first-pick__chosen">{picked ? `${label(picked)}님부터 시작합니다` : '입장한 순서대로 시작합니다'}</p>
+        )}
+        {players.length >= 2 && (
+          <p className="hint">
+            순서: {turnOrder(players, picked?.id).map((p) => p.name).join(' → ')}
+          </p>
+        )}
+      </section>
+
       {isHost ? (
         <button
           className="btn btn--primary btn--big"
-          disabled={connected < state.limits.minPlayers}
+          disabled={players.length < state.limits.minPlayers}
           onClick={() => send({ type: 'start' })}
         >
           게임 시작

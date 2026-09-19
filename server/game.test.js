@@ -226,6 +226,71 @@ describe('라운드 진행과 종료', () => {
   });
 });
 
+describe('첫 출제자 지정', () => {
+  it('지정하지 않으면 입장 순서대로 출제한다', () => {
+    const room = roomWith(3);
+    g.startGame(room, 'p0', T0);
+    expect(room.roster).toEqual(['p0', 'p1', 'p2']);
+    expect(room.answererId).toBe('p0');
+  });
+
+  it('지정한 사람이 첫 출제자가 되고, 나머지는 입장 순서를 이어 돈다', () => {
+    const room = roomWith(4);
+    expect(g.pickFirstAnswerer(room, 'p0', 'p2').ok).toBe(true);
+    g.startGame(room, 'p0', T0);
+    expect(room.roster).toEqual(['p2', 'p3', 'p0', 'p1']);
+    expect(room.answererId).toBe('p2');
+  });
+
+  it('방장만, 대기실에서만, 방에 있는 사람만 지정할 수 있다', () => {
+    const room = roomWith(3);
+    expect(g.pickFirstAnswerer(room, 'p1', 'p2').ok).toBe(false);
+    expect(g.pickFirstAnswerer(room, 'p0', '없는사람').ok).toBe(false);
+    expect(room.firstAnswererId).toBeNull();
+
+    g.startGame(room, 'p0', T0);
+    expect(g.pickFirstAnswerer(room, 'p0', 'p1').ok).toBe(false);
+  });
+
+  it('null을 주면 입장 순서대로 되돌린다', () => {
+    const room = roomWith(3);
+    g.pickFirstAnswerer(room, 'p0', 'p2');
+    expect(g.pickFirstAnswerer(room, 'p0', null).ok).toBe(true);
+    expect(room.firstAnswererId).toBeNull();
+  });
+
+  it('지정된 사람이 대기실에서 나가면 지정이 풀린다', () => {
+    const room = roomWith(3);
+    g.pickFirstAnswerer(room, 'p0', 'p2');
+    g.disconnect(room, 'p2', T0);
+    expect(room.firstAnswererId).toBeNull();
+    g.startGame(room, 'p0', T0);
+    expect(room.answererId).toBe('p0');
+  });
+
+  it('다시 시작할 때 그 사람이 남아 있으면 지정이 유지된다', () => {
+    const room = roomWith(3);
+    g.pickFirstAnswerer(room, 'p0', 'p1');
+    g.startGame(room, 'p0', T0);
+    g.endGame(room);
+    g.restart(room, 'p0');
+    expect(room.firstAnswererId).toBe('p1');
+
+    // 그 사람이 게임 중 끊긴 채 끝났다면 restart가 좌석을 치우면서 지정도 푼다
+    g.startGame(room, 'p0', T0);
+    g.disconnect(room, 'p1', T0);
+    g.endGame(room);
+    g.restart(room, 'p0');
+    expect(room.firstAnswererId).toBeNull();
+  });
+
+  it('플레이어 화면에 지정 결과가 담긴다', () => {
+    const room = roomWith(2);
+    g.pickFirstAnswerer(room, 'p0', 'p1');
+    expect(g.viewFor(room, 'p1').firstAnswererId).toBe('p1');
+  });
+});
+
 describe('접속이 끊길 때', () => {
   it('대기실에서 나가면 자리가 비고 방장이 넘어간다', () => {
     const room = roomWith(3);
