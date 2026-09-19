@@ -285,3 +285,36 @@ describe('normalize', () => {
     expect(g.normalize(a) === g.normalize(b)).toBe(same);
   });
 });
+
+describe('고정 방 목록', () => {
+  it('요약에 인원과 입장 가능 여부가 담긴다', () => {
+    const room = g.createRoom('1');
+    expect(g.summary(room)).toMatchObject({ code: '1', name: '1번 방', players: 0, capacity: 8, joinable: true });
+
+    for (let i = 0; i < 8; i += 1) g.joinRoom(room, { id: `p${i}`, name: `P${i}` });
+    expect(g.summary(room)).toMatchObject({ players: 8, joinable: false }); // 정원 초과
+
+    g.startGame(room, 'p0', T0);
+    expect(g.summary(room)).toMatchObject({ phase: 'secret', joinable: false }); // 게임 중
+  });
+
+  it('끊긴 사람은 목록의 인원수에서 빠진다', () => {
+    const room = roomWith(3);
+    g.startGame(room, 'p0', T0);
+    g.disconnect(room, 'p2', T0);
+    expect(g.summary(room).players).toBe(2);
+  });
+
+  it('초기화하면 이름과 번호는 유지한 채 빈 대기실이 된다', () => {
+    const room = roomWith(3);
+    g.startGame(room, 'p0', T0);
+    g.setSecret(room, 'p0', '고양이', T0);
+    g.resetRoom(room, T0);
+
+    expect(g.summary(room)).toMatchObject({ code: 'TEST', players: 0, phase: 'lobby', joinable: true });
+    expect(room.players).toHaveLength(0);
+    expect(room.hostId).toBeNull();
+    expect(room.secret).toBeNull();
+    expect(g.viewFor(room, 'p0').secret).toBeNull(); // 이전 라운드 정답이 남아 있지 않다
+  });
+});

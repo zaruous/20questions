@@ -27,28 +27,17 @@ function useCountdown(deadline, serverNow) {
 
 const mmss = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 
-export default function Game({ state, send, leaveRoom, serverNow, setNotice }) {
+export default function Game({ state, send, leaveRoom, serverNow }) {
   const left = useCountdown(state.deadline, serverNow);
   const nameOf = (id) => state.players.find((p) => p.id === id)?.name ?? '???';
   const isHost = state.you === state.hostId;
   const isAnswerer = state.you === state.answererId;
   const pending = state.questions.find((q) => q.id === state.pendingId) ?? null;
 
-  const copyCode = async () => {
-    try {
-      await navigator.clipboard.writeText(state.code);
-      setNotice(`방 코드 ${state.code}를 복사했습니다.`);
-    } catch {
-      setNotice(`방 코드: ${state.code}`);
-    }
-  };
-
   return (
     <main className="game">
       <header className="game__header">
-        <button className="code" onClick={copyCode} title="클릭하면 복사됩니다">
-          방 코드 <b>{state.code}</b>
-        </button>
+        <span className="code">{state.name}</span>
         {state.phase !== 'lobby' && (
           <div className="meta">
             <span>
@@ -148,8 +137,8 @@ function Lobby({ state, isHost, send }) {
   const connected = state.players.filter((p) => p.connected).length;
   return (
     <div className="lobby">
-      <h2>친구에게 방 코드를 알려주세요</h2>
-      <p className="lobby__code">{state.code}</p>
+      <h2>친구에게 몇 번 방인지 알려주세요</h2>
+      <p className="lobby__code">{state.name}</p>
       <p className="hint">
         {connected}명 참가 중 · {state.limits.minPlayers}명부터 시작할 수 있습니다 (최대 {state.limits.maxPlayers}명)
       </p>

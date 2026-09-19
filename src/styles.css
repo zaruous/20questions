@@ -44,6 +44,7 @@ button, input { font: inherit; }
   background: var(--panel-2);
   color: var(--text);
   cursor: pointer;
+  white-space: nowrap;
   transition: filter 0.15s, opacity 0.15s;
 }
 .btn:hover:not(:disabled) { filter: brightness(1.2); }
@@ -86,7 +87,25 @@ input:disabled { opacity: 0.6; }
 }
 .divider { text-align: center; color: var(--muted); font-size: 13px; }
 .join-row { display: flex; gap: 8px; }
-.join-row__code { text-transform: uppercase; letter-spacing: 4px; text-align: center; font-weight: 700; }
+.join-row__code { flex: 1 1 auto; min-width: 0; text-transform: uppercase; letter-spacing: 4px; text-align: center; font-weight: 700; }
+.join-row .btn { flex: 0 0 auto; }
+.rooms { margin-top: 24px; }
+.rooms h2 { font-size: 15px; margin-bottom: 10px; }
+.rooms ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rooms li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.rooms li.is-locked { opacity: 0.6; }
+.rooms__info { display: flex; flex-direction: column; }
+.rooms__info .hint { margin: 0; }
+
 .rules { margin-top: 32px; color: var(--muted); font-size: 14px; }
 .rules h2 { font-size: 15px; color: var(--text); }
 .rules ol { padding-left: 20px; }
@@ -98,12 +117,11 @@ input:disabled { opacity: 0.6; }
 .code {
   background: var(--panel);
   border: 1px solid var(--line);
-  color: var(--muted);
+  color: var(--text);
   border-radius: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
+  padding: 8px 14px;
+  font-weight: 700;
 }
-.code b { color: var(--text); letter-spacing: 3px; margin-left: 6px; }
 .meta { display: flex; gap: 16px; margin-left: auto; color: var(--muted); font-size: 14px; align-items: center; }
 .meta b { color: var(--text); }
 .meta .urgent { color: var(--no); font-weight: 700; }
@@ -124,7 +142,7 @@ input:disabled { opacity: 0.6; }
 
 .lobby { text-align: center; padding: 24px 12px; }
 .lobby h2 { font-size: 16px; color: var(--muted); font-weight: 600; }
-.lobby__code { font-size: 52px; font-weight: 800; letter-spacing: 12px; margin: 8px 0; }
+.lobby__code { font-size: 44px; font-weight: 800; margin: 8px 0; }
 
 .feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .feed__empty { color: var(--muted); text-align: center; padding: 24px; }
@@ -149,8 +167,14 @@ input:disabled { opacity: 0.6; }
 .result__secret b { color: var(--accent); font-size: 20px; }
 
 @media (max-width: 720px) {
-  .game__body { grid-template-columns: 1fr; }
+  .game { padding: 10px; gap: 8px; }
+  .game__header { gap: 8px; }
+  .game__header .btn--ghost { margin-left: auto; }
+  /* 좁은 화면에서는 라운드/질문/타이머를 아래 줄 전체에 펼친다 */
+  .meta { order: 3; width: 100%; margin-left: 0; justify-content: space-between; font-size: 13px; }
+  .game__body { grid-template-columns: 1fr; align-items: start; align-content: start; }
   .players ul { flex-direction: row; flex-wrap: wrap; }
+  .players li { flex: 1 1 auto; }
   .main-panel { max-height: 45vh; }
   .home__title { font-size: 36px; }
 }

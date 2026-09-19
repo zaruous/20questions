@@ -22,6 +22,7 @@ function loadSeat() {
 
 export function useGameSocket() {
   const [state, setState] = useState(null);
+  const [rooms, setRooms] = useState([]); // 입장 전에 보이는 방 목록
   const [status, setStatus] = useState('connecting'); // connecting | online | offline
   const [notice, setNotice] = useState('');
   const socketRef = useRef(null);
@@ -58,6 +59,8 @@ export function useGameSocket() {
           } catch {
             /* 사생활 보호 모드 등에서 저장 실패해도 게임은 계속된다 */
           }
+        } else if (msg.type === 'rooms') {
+          setRooms(msg.rooms);
         } else if (msg.type === 'state') {
           offsetRef.current = msg.serverNow - Date.now();
           setState(msg.state);
@@ -105,17 +108,9 @@ export function useGameSocket() {
     else setNotice('서버와 연결이 끊겼습니다. 다시 연결하는 중…');
   }, []);
 
-  const createRoom = useCallback(
-    (name) => {
-      entryRef.current = { type: 'create', name };
-      send(entryRef.current);
-    },
-    [send],
-  );
-
   const joinRoom = useCallback(
     (code, name) => {
-      entryRef.current = { type: 'join', code: String(code).trim().toUpperCase(), name };
+      entryRef.current = { type: 'join', code: String(code), name };
       send(entryRef.current);
     },
     [send],
@@ -134,5 +129,5 @@ export function useGameSocket() {
 
   const serverNow = useCallback(() => Date.now() + offsetRef.current, []);
 
-  return { state, status, notice, setNotice, send, createRoom, joinRoom, leaveRoom, serverNow };
+  return { state, rooms, status, notice, setNotice, send, joinRoom, leaveRoom, serverNow };
 }

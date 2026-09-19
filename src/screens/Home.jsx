@@ -1,8 +1,20 @@
 import React, { useState } from 'react';
 
-export default function Home({ status, createRoom, joinRoom }) {
+function statusText(room) {
+  if (room.phase === 'lobby') return room.players === 0 ? '비어 있음' : `${room.players}/${room.capacity}명 대기 중`;
+  // 게임 중이지만 접속자가 0명 = 다들 나갔고 곧 대기실로 돌아올 방
+  if (room.players === 0) return '정리 중…';
+  return `${room.players}명 게임 중`;
+}
+
+function buttonText(room) {
+  if (room.joinable) return '들어가기';
+  if (room.phase === 'lobby') return '가득 참';
+  return room.players === 0 ? '정리 중' : '게임 중';
+}
+
+export default function Home({ status, rooms, joinRoom }) {
   const [name, setName] = useState('');
-  const [code, setCode] = useState('');
   const ready = status === 'online' && name.trim().length > 0;
 
   return (
@@ -21,32 +33,33 @@ export default function Home({ status, createRoom, joinRoom }) {
             autoFocus
           />
         </label>
-
-        <button className="btn btn--primary" disabled={!ready} onClick={() => createRoom(name)}>
-          새 방 만들기
-        </button>
-
-        <div className="divider">또는</div>
-
-        <form
-          className="join-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (ready && code.trim()) joinRoom(code, name);
-          }}
-        >
-          <input
-            className="join-row__code"
-            value={code}
-            maxLength={4}
-            placeholder="방 코드"
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-          />
-          <button className="btn" type="submit" disabled={!ready || !code.trim()}>
-            참가하기
-          </button>
-        </form>
       </div>
+
+      <section className="rooms">
+        <h2>방 고르기</h2>
+        {rooms.length === 0 ? (
+          <p className="hint">방 목록을 불러오는 중…</p>
+        ) : (
+          <ul>
+            {rooms.map((room) => (
+              <li key={room.code} className={room.joinable ? '' : 'is-locked'}>
+                <div className="rooms__info">
+                  <b>{room.name}</b>
+                  <span className="hint">{statusText(room)}</span>
+                </div>
+                <button
+                  className={room.joinable ? 'btn btn--primary' : 'btn'}
+                  disabled={!ready || !room.joinable}
+                  onClick={() => joinRoom(room.code, name)}
+                >
+                  {buttonText(room)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="hint">{name.trim() ? '들어갈 방을 고르세요.' : '닉네임을 먼저 입력하세요.'}</p>
+      </section>
 
       <section className="rules">
         <h2>규칙</h2>
