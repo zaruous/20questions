@@ -33,6 +33,29 @@ WebSocket을 지원하는 호스팅에 배포하거나, `cloudflared` / `ngrok` 
 npm run dev       # 서버(3001) + Vite(5173, LAN 개방) → http://localhost:5173
 ```
 
+## 배포 (Render 무료 플랜)
+
+`render.yaml`이 포함되어 있습니다. Render 대시보드에서 **New → Blueprint**로 이 저장소를
+연결하면 설정 입력 없이 서비스가 만들어집니다. 수동으로 만들 때는 아래 값을 그대로 넣으세요.
+
+| 항목 | 값 |
+| --- | --- |
+| Runtime | Node |
+| Build Command | `npm ci --include=dev && npm run build` |
+| Start Command | `npm start` |
+| Health Check Path | `/healthz` |
+
+`--include=dev`가 **반드시** 필요합니다. Render는 빌드 중에도 `NODE_ENV=production`이라
+`npm ci`만 쓰면 `vite`가 설치되지 않아 빌드가 깨집니다.
+`PORT`는 Render가 주입하고 서버가 그대로 읽습니다. `https`로 열리면 클라이언트도 `wss`로 붙습니다.
+
+무료 플랜에서 알아 둘 것:
+
+- **15분간 트래픽이 없으면 잠듭니다.** 다시 깨는 데 1분쯤 걸리므로 첫 접속자만 기다립니다.
+  WebSocket 메시지도 트래픽으로 세기 때문에 게임하는 동안에는 잠들지 않습니다.
+- **깨어날 때 메모리가 비워집니다.** 방 3개는 다시 만들어지지만 진행 중이던 판은 사라집니다.
+- **인스턴스를 늘리지 마세요.** 방 목록이 프로세스 메모리에 있어서 여러 대로 늘리면 갈라집니다.
+
 ## 테스트
 
 ```bash

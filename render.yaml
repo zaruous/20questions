@@ -1,0 +1,11 @@
+# Render Blueprint. 대시보드에서 New > Blueprint 로 이 파일을 읽히면 서비스가 만들어진다.
+services:
+  - type: web
+    name: twenty-questions
+    runtime: node
+    plan: free
+    region: singapore # 무료 리전 중 한국에서 가장 가깝다
+    branch: main
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
