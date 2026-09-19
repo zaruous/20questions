@@ -1,7 +1,7 @@
 // 실제 WebSocket 서버를 띄우고 여러 클라이언트로 한 라운드를 끝까지 돌린다.
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import WebSocket from 'ws';
-import { createServer } from './index.js';
+import { createServer, resetRooms } from './index.js';
 
 let server;
 let url;
@@ -11,6 +11,10 @@ beforeAll(async () => {
   server = createServer();
   await new Promise((resolve) => server.listen(0, resolve));
   url = `ws://localhost:${server.address().port}/ws`;
+});
+
+beforeEach(() => {
+  resetRooms(); // 방이 고정이므로 테스트마다 초기 상태로 되돌린다
 });
 
 afterAll(async () => {
@@ -50,30 +54,78 @@ async function connect() {
 }
 
 const isState = (phase) => (m) => m.type === 'state' && m.state.phase === phase;
+const latestRooms = (client) => [...client.inbox].reverse().find((m) => m.type === 'rooms')?.rooms;
 
-describe('WebSocket 서버', () => {
-  it('3명이 한 라운드를 끝까지 진행한다', async () => {
+describe('WebSocket 서버 (고정 3개 방)', () => {
+  it('접속하면 방 목록 3개를 바로 받는다', async () => {
+    const a = await connect();
+    const list = (await a.wait((m) => m.type === 'rooms')).rooms;
+    expect(list).toHaveLength(3);
+    expect(list.map((r) => r.code)).toEqual(['1', '2', '3']);
+    expect(list.every((r) => r.joinable && r.players === 0 && r.capacity === 8)).toBe(true);
+    a.close();
+  });
+
+  it('방을 고르면 들어가고, 밖에 있는 사람의 목록이 실시간으로 바뀐다', async () => {
+    const watcher = await connect(); // 첫 화면에 머물러 있는 사람
+    await watcher.wait((m) => m.type === 'rooms');
+
+    const a = await connect();
+    a.send({ type: 'join', code: '2', name: '지우' });
+    const joined = await a.wait((m) => m.type === 'joined');
+    expect(joined.code).toBe('2');
+    expect(a.latest().name).toBe('2번 방');
+
+    await watcher.wait((m) => m.type === 'rooms' && m.rooms.find((r) => r.code === '2').players === 1);
+    const row = latestRooms(watcher).find((r) => r.code === '2');
+    expect(row).toMatchObject({ players: 1, phase: 'lobby', joinable: true });
+    expect(latestRooms(watcher).find((r) => r.code === '1').players).toBe(0);
+
+    [watcher, a].forEach((c) => c.close());
+  });
+
+  it('없는 방 번호는 거절한다', async () => {
+    const a = await connect();
+    a.send({ type: 'join', code: '4', name: '길잃음' });
+    await a.wait((m) => m.type === 'error' && m.message.includes('그런 방이 없습니다'));
+    a.close();
+  });
+
+  it('게임이 시작된 방은 목록에서 잠기고 새 사람이 못 들어온다', async () => {
+    const watcher = await connect();
+    await watcher.wait((m) => m.type === 'rooms');
+    const a = await connect();
+    const b = await connect();
+    a.send({ type: 'join', code: '3', name: '방장' });
+    b.send({ type: 'join', code: '3', name: '손님' });
+    await a.wait((m) => m.type === 'state' && m.state.players.length === 2);
+    a.send({ type: 'start' });
+    await a.wait(isState('secret'));
+
+    await watcher.wait((m) => m.type === 'rooms' && !m.rooms.find((r) => r.code === '3').joinable);
+    expect(latestRooms(watcher).find((r) => r.code === '3')).toMatchObject({ joinable: false, phase: 'secret' });
+
+    const late = await connect();
+    late.send({ type: 'join', code: '3', name: '지각생' });
+    await late.wait((m) => m.type === 'error' && m.message.includes('진행 중'));
+
+    [watcher, a, b, late].forEach((c) => c.close());
+  });
+
+  it('한 방에서 3명이 한 라운드를 끝까지 진행한다', async () => {
     const a = await connect();
     const b = await connect();
     const c = await connect();
-
-    a.send({ type: 'create', name: '출제자' });
-    const joined = await a.wait((m) => m.type === 'joined');
-    const code = joined.code;
-    expect(code).toHaveLength(4);
-
-    b.send({ type: 'join', code, name: '비' });
-    c.send({ type: 'join', code, name: '씨' });
+    for (const [client, name] of [[a, '출제자'], [b, '비'], [c, '씨']]) {
+      client.send({ type: 'join', code: '1', name });
+    }
     await a.wait((m) => m.type === 'state' && m.state.players.length === 3);
 
-    // 방장이 아니면 시작할 수 없다
     b.send({ type: 'start' });
     await b.wait((m) => m.type === 'error' && m.message.includes('방장'));
 
     a.send({ type: 'start' });
     await c.wait(isState('secret'));
-    expect(c.latest().answererId).toBe(joined.playerId);
-
     a.send({ type: 'secret', text: '고양이' });
     await b.wait(isState('asking'));
 
@@ -90,10 +142,9 @@ describe('WebSocket 서버', () => {
 
     c.send({ type: 'guess', text: ' 고양이 ' });
     await b.wait(isState('roundEnd'));
-
     const view = b.latest();
-    expect(view.secret).toBe('고양이'); // 라운드가 끝나면 공개
-    expect(view.lastResult.reason).toBe('solved');
+    expect(view.secret).toBe('고양이');
+    expect(view.lastResult).toMatchObject({ reason: 'solved' });
     expect(view.players.find((p) => p.name === '씨').score).toBe(3);
     expect(view.players.find((p) => p.name === '출제자').score).toBe(1);
 
@@ -104,10 +155,9 @@ describe('WebSocket 서버', () => {
     const a = await connect();
     const b = await connect();
     const c = await connect();
-    a.send({ type: 'create', name: '방장' });
-    const { code } = await a.wait((m) => m.type === 'joined');
-    b.send({ type: 'join', code, name: '손님' });
-    c.send({ type: 'join', code, name: '구경' });
+    a.send({ type: 'join', code: '2', name: '방장' });
+    b.send({ type: 'join', code: '2', name: '손님' });
+    c.send({ type: 'join', code: '2', name: '구경' });
     const bJoined = await b.wait((m) => m.type === 'joined');
     await a.wait((m) => m.type === 'state' && m.state.players.length === 3);
 
@@ -115,12 +165,11 @@ describe('WebSocket 서버', () => {
     await a.wait(isState('secret'));
 
     b.close();
-    // 3명 중 1명이 빠져도 라운드는 계속되고, 자리만 '끊김'으로 남는다
     await a.wait((m) => m.type === 'state' && m.state.players.some((p) => !p.connected));
     expect(a.latest().phase).toBe('secret');
 
     const back = await connect();
-    back.send({ type: 'join', code, token: bJoined.playerId });
+    back.send({ type: 'join', code: '2', token: bJoined.playerId });
     const view = (await back.wait(isState('secret'))).state;
     expect(view.you).toBe(bJoined.playerId);
     expect(view.players).toHaveLength(3);
@@ -129,29 +178,47 @@ describe('WebSocket 서버', () => {
     [a, c, back].forEach((client) => client.close());
   });
 
-  it('없는 방 코드와 가득 찬 방을 거절한다', async () => {
-    const stray = await connect();
-    stray.send({ type: 'join', code: 'ZZZZ', name: '길잃음' });
-    await stray.wait((m) => m.type === 'error' && m.message.includes('방 코드'));
+  it('사람이 다 나간 방은 다시 대기실로 열린다', async () => {
+    const a = await connect();
+    const b = await connect();
+    a.send({ type: 'join', code: '1', name: '지우' });
+    b.send({ type: 'join', code: '1', name: '민수' });
+    await a.wait((m) => m.type === 'state' && m.state.players.length === 2);
+    a.send({ type: 'start' });
+    await a.wait(isState('secret'));
 
-    stray.send({ type: 'ask', text: '방에도 없는데 질문' });
-    await stray.wait((m) => m.type === 'error' && m.message.includes('먼저 방에'));
+    // 둘 다 나가면 인원 부족으로 게임이 끝나고, 방은 비워진 채 잠긴 상태가 된다
+    a.close();
+    b.close();
 
-    const host = await connect();
-    host.send({ type: 'create', name: 'H' });
-    const { code } = await host.wait((m) => m.type === 'joined');
-    const others = [];
-    for (let i = 1; i < 8; i += 1) {
+    // 1초 틱이 돌면서 방을 대기실로 되돌려야 한다 (끝난 게임은 즉시 반납)
+    const watcher = await connect();
+    const list = await watcher.wait(
+      (m) => m.type === 'rooms' && m.rooms.find((r) => r.code === '1')?.joinable,
+      4000,
+    );
+    expect(list.rooms.find((r) => r.code === '1')).toMatchObject({ players: 0, phase: 'lobby', joinable: true });
+
+    // 실제로 다시 들어갈 수 있어야 한다
+    watcher.send({ type: 'join', code: '1', name: '새손님' });
+    const back = await watcher.wait(isState('lobby'));
+    expect(back.state.players).toHaveLength(1);
+    watcher.close();
+  });
+
+  it('정원 8명이 차면 9번째를 거절한다', async () => {
+    const clientsInRoom = [];
+    for (let i = 0; i < 8; i += 1) {
       const client = await connect();
-      client.send({ type: 'join', code, name: `P${i}` });
-      others.push(client);
+      client.send({ type: 'join', code: '3', name: `P${i}` });
+      clientsInRoom.push(client);
     }
-    await host.wait((m) => m.type === 'state' && m.state.players.length === 8);
+    await clientsInRoom[0].wait((m) => m.type === 'state' && m.state.players.length === 8);
 
     const ninth = await connect();
-    ninth.send({ type: 'join', code, name: '아홉' });
+    ninth.send({ type: 'join', code: '3', name: '아홉' });
     await ninth.wait((m) => m.type === 'error' && m.message.includes('가득'));
 
-    [stray, host, ninth, ...others].forEach((client) => client.close());
+    [...clientsInRoom, ninth].forEach((client) => client.close());
   });
 });

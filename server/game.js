@@ -23,9 +23,10 @@ export function normalize(text) {
     .replace(/[\s·・\-_.,!?~'"()[\]]/g, '');
 }
 
-export function createRoom(code, now = Date.now()) {
+export function createRoom(code, name = `${code}번 방`, now = Date.now()) {
   return {
     code,
+    name,
     createdAt: now,
     phase: 'lobby', // lobby | secret | asking | roundEnd | gameEnd
     hostId: null,
@@ -269,6 +270,28 @@ export function tick(room, now = Date.now()) {
   return false;
 }
 
+/** 입장 전 화면에 보여줄 방 목록용 요약 */
+export function summary(room) {
+  return {
+    code: room.code,
+    name: room.name,
+    players: connectedPlayers(room).length,
+    capacity: MAX_PLAYERS,
+    phase: room.phase,
+    joinable: room.phase === 'lobby' && room.players.length < MAX_PLAYERS,
+  };
+}
+
+/**
+ * 방을 빈 대기실로 되돌린다.
+ * 방이 3개로 고정이라, 사람이 다 나간 방이 '게임중'으로 잠겨 있으면 그 자리가 죽는다.
+ */
+export function resetRoom(room, now = Date.now()) {
+  const fresh = createRoom(room.code, room.name, now);
+  Object.assign(room, fresh, { createdAt: room.createdAt });
+  return ok();
+}
+
 /**
  * 플레이어별 화면 상태. 화이트리스트 방식으로만 만든다.
  * 정답 단어는 출제자 본인과 라운드/게임 종료 이후에만 포함된다.
@@ -278,6 +301,7 @@ export function viewFor(room, playerId) {
   const isAnswerer = playerId === room.answererId;
   return {
     code: room.code,
+    name: room.name,
     phase: room.phase,
     you: playerId,
     hostId: room.hostId,
