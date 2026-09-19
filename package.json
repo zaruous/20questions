@@ -1,0 +1,28 @@
+{
+  "name": "twenty-questions",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "2~8인 실시간 20고개 게임 (React + Vite + Node WebSocket)",
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "node --watch server/index.js",
+    "dev:client": "vite",
+    "build": "vite build",
+    "preview": "npm run build && node server/index.js",
+    "start": "node server/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}
