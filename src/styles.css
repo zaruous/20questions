@@ -151,8 +151,14 @@ input:disabled { opacity: 0.6; }
 .result__secret b { color: var(--accent); font-size: 20px; }
 
 @media (max-width: 720px) {
-  .game__body { grid-template-columns: 1fr; }
+  .game { padding: 10px; gap: 8px; }
+  .game__header { gap: 8px; }
+  .game__header .btn--ghost { margin-left: auto; }
+  /* 좁은 화면에서는 라운드/질문/타이머를 아래 줄 전체에 펼친다 */
+  .meta { order: 3; width: 100%; margin-left: 0; justify-content: space-between; font-size: 13px; }
+  .game__body { grid-template-columns: 1fr; align-items: start; align-content: start; }
   .players ul { flex-direction: row; flex-wrap: wrap; }
+  .players li { flex: 1 1 auto; }
   .main-panel { max-height: 45vh; }
   .home__title { font-size: 36px; }
 }

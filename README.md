@@ -17,8 +17,20 @@ npm run build
 npm start        # http://localhost:3001  (PORT 환경변수로 변경 가능)
 ```
 
-같은 네트워크의 다른 기기에서 접속하려면 `npm run dev -- --host` 또는 빌드 후 `npm start`를 쓰고
-방장이 만든 **4자리 방 코드**를 공유하면 됩니다.
+### 폰에서 같이 하기 (같은 와이파이)
+
+두 실행 방식 모두 LAN에 열려 있으므로, PC의 내부 IP를 확인해 폰 브라우저로 접속하면 됩니다.
+
+```bash
+npm start                 # 또는 npm run dev
+# macOS/Linux: ipconfig getifaddr en0  또는  hostname -I
+# 폰에서 http://<PC의 내부 IP>:3001  (dev 모드면 :5173)
+```
+
+방장이 만든 **4자리 방 코드**를 공유하면 각자 폰에서 참가합니다.
+서로 다른 네트워크(각자 집, LTE)에서 하려면 공개 주소가 필요합니다 —
+WebSocket을 지원하는 호스팅에 배포하거나 `cloudflared`/`ngrok` 같은 터널을 `npm start` 앞에 붙이세요.
+(터널은 반드시 `npm start`(3001)에 연결하세요. Vite 개발 서버는 외부 도메인 접근을 차단합니다.)
 
 ## 테스트
 
