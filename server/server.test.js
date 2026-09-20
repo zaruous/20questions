@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import WebSocket from 'ws';
 import { createServer, resetRooms } from './index.js';
+import { RTC_DATA_MAX } from './rtc.js';
 
 let server;
 let url;
@@ -299,5 +300,96 @@ describe('라이브채팅 (게임 상태와 분리)', () => {
     expect((await back.wait((m) => m.type === 'chatHistory')).messages).toHaveLength(1);
 
     [a, back].forEach((c) => c.close());
+  });
+});
+
+describe('음성 (시그널링 릴레이)', () => {
+  const voiceMsgs = (client) => client.inbox.filter((m) => m.type === 'voice');
+  const latestVoice = (client) => voiceMsgs(client).at(-1);
+
+  it('참여하면 모두에게 참여자 목록이 가고, 시그널은 상대 한 사람에게만 닿는다', async () => {
+    const a = await connect();
+    const b = await connect();
+    const c = await connect();
+    for (const [client, name] of [[a, '가'], [b, '나'], [c, '다']]) client.send({ type: 'join', code: '1', name });
+    const aId = (await a.wait((m) => m.type === 'joined')).playerId;
+    const bId = (await b.wait((m) => m.type === 'joined')).playerId;
+    const cId = (await c.wait((m) => m.type === 'joined')).playerId;
+    await c.wait((m) => m.type === 'state' && m.state.players.length === 3);
+    expect((await c.wait((m) => m.type === 'voice')).members).toEqual([]); // 입장 직후 빈 목록을 받는다
+
+    a.send({ type: 'voice', on: true });
+    b.send({ type: 'voice', on: true });
+    await c.wait((m) => m.type === 'voice' && m.members.length === 2);
+    expect(latestVoice(c).members).toEqual(
+      expect.arrayContaining([
+        { id: aId, name: '가' },
+        { id: bId, name: '나' },
+      ]),
+    );
+    expect(c.latest()).not.toHaveProperty('voice'); // 게임 상태 스냅샷에는 실리지 않는다
+
+    // a → b: b만 받고, 보낸 사람 id가 붙는다
+    const offer = { sdp: { type: 'offer', sdp: 'v=0' } };
+    a.send({ type: 'rtc', to: bId, data: offer });
+    expect(await b.wait((m) => m.type === 'rtc')).toEqual({ type: 'rtc', from: aId, data: offer });
+
+    // 참여하지 않은 사람에게, 자기 자신에게, 너무 큰 데이터는 중계하지 않는다
+    a.send({ type: 'rtc', to: cId, data: { candidate: {} } });
+    a.send({ type: 'rtc', to: aId, data: { candidate: {} } });
+    a.send({ type: 'rtc', to: bId, data: { sdp: 'x'.repeat(RTC_DATA_MAX + 1) } });
+    a.send({ type: 'rtc', to: 42, data: { candidate: {} } });
+    await a.wait(() => a.inbox.filter((m) => m.type === 'error').length === 4);
+    expect(a.inbox.filter((m) => m.type === 'error').map((m) => m.message)).toEqual([
+      expect.stringContaining('참여한 사람에게만'),
+      expect.stringContaining('참여한 사람에게만'),
+      expect.stringContaining('너무 큽니다'),
+      expect.stringContaining('잘못된 시그널링'),
+    ]);
+    expect(b.inbox.filter((m) => m.type === 'rtc')).toHaveLength(1);
+    expect(c.inbox.filter((m) => m.type === 'rtc')).toHaveLength(0);
+
+    // 끊으면 목록이 줄고, 연결 자체가 끊긴 사람도 빠진다
+    b.send({ type: 'voice', on: false });
+    await c.wait(() => latestVoice(c)?.members.length === 1);
+    expect(latestVoice(c).members).toEqual([{ id: aId, name: '가' }]);
+    a.close();
+    await c.wait(() => latestVoice(c)?.members.length === 0);
+
+    [b, c].forEach((client) => client.close());
+  });
+
+  it('늦게 들어온 사람은 현재 참여자를 받고, 다른 탭에서 돌아온 사람은 다시 참여해야 한다', async () => {
+    const a = await connect();
+    a.send({ type: 'join', code: '2', name: '가' });
+    const aId = (await a.wait((m) => m.type === 'joined')).playerId;
+    a.send({ type: 'voice', on: true });
+    await a.wait((m) => m.type === 'voice' && m.members.length === 1);
+
+    const b = await connect();
+    b.send({ type: 'join', code: '2', name: '나' });
+    const bId = (await b.wait((m) => m.type === 'joined')).playerId;
+    expect((await b.wait((m) => m.type === 'voice')).members).toEqual([{ id: aId, name: '가' }]);
+
+    // 화면이 늦게 떠서 입장 직후 목록을 놓쳤으면 다시 요청할 수 있다
+    b.send({ type: 'voiceState' });
+    await b.wait(() => voiceMsgs(b).length === 2);
+    expect(latestVoice(b).members).toEqual([{ id: aId, name: '가' }]);
+
+    await a.wait((m) => m.type === 'state' && m.state.players.length === 2);
+    a.send({ type: 'start' });
+    await b.wait(isState('secret'));
+    b.send({ type: 'voice', on: true });
+    await a.wait(() => latestVoice(a)?.members.length === 2);
+    const before = voiceMsgs(a).length;
+
+    // b가 다른 탭에서 같은 토큰으로 들어오면 이전 탭은 밀려나고, 새 탭은 음성을 이어받지 못하므로 참여가 풀린다
+    const back = await connect();
+    back.send({ type: 'join', code: '2', token: bId });
+    expect((await back.wait((m) => m.type === 'voice')).members).toEqual([{ id: aId, name: '가' }]);
+    await a.wait(() => voiceMsgs(a).length > before);
+    expect(latestVoice(a).members).toEqual([{ id: aId, name: '가' }]);
+
+    [a, back].forEach((client) => client.close());
   });
 });

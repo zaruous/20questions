@@ -1,5 +1,6 @@
 // WebSocket 서버 (I/O 계층).
-// 게임 규칙은 game.js, 라이브채팅은 chat.js에 있고, 여기서는 연결/방 목록/브로드캐스트/시간만 다룬다.
+// 게임 규칙은 game.js, 라이브채팅은 chat.js, 음성 참여자·시그널링 규칙은 rtc.js에 있고,
+// 여기서는 연결/방 목록/브로드캐스트/시간만 다룬다.
 import http from 'node:http';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import * as game from './game.js';
 import * as chat from './chat.js';
+import * as rtc from './rtc.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
@@ -24,8 +26,23 @@ const rooms = new Map(
 /** 방마다 하나씩 두는 채팅 기록. 게임 상태(rooms)와 따로 살고, 방이 대기실로 되돌아갈 때 함께 비운다. */
 const chats = new Map([...rooms.keys()].map((code) => [code, chat.createChat()]));
 const chatHistoryOf = (code) => ({ type: 'chatHistory', messages: chats.get(code).messages, textMax: chat.CHAT_TEXT_MAX });
+/** 방마다 하나씩 두는 음성 참여자 목록. 채팅과 같은 생애를 산다. */
+const voices = new Map([...rooms.keys()].map((code) => [code, rtc.createVoice()]));
 /** @type {Map<import('ws').WebSocket, {roomCode: string, playerId: string, name: string}>} */
 const sessions = new Map();
+
+/** 음성 참여자 목록. 이름은 게임 상태가 아니라 세션에서 가져온다. */
+function voiceStateOf(code) {
+  const nameOf = new Map();
+  for (const s of sessions.values()) if (s.roomCode === code) nameOf.set(s.playerId, s.name);
+  return { type: 'voice', members: rtc.membersOf(voices.get(code)).map((id) => ({ id, name: nameOf.get(id) ?? '???' })) };
+}
+
+/** 채팅 기록과 음성 참여자를 함께 비운다. 방이 대기실로 되돌아갈 때. */
+function resetSocial(code) {
+  chats.set(code, chat.createChat());
+  voices.set(code, rtc.createVoice());
+}
 /** 열려 있는 모든 연결. 이 중 sessions에 없는 것이 '아직 방을 고르는 중'인 사람이다. */
 const lobbySockets = new Set();
 
@@ -74,6 +91,34 @@ function handleChat(ws, session, msg) {
   const result = chat.postMessage(log, { by: session.playerId, name: session.name }, msg.text);
   if (!result.ok) return fail(ws, result.error);
   broadcastRoom(session.roomCode, { type: 'chat', message: result.message });
+}
+
+/**
+ * 음성. 참여/이탈은 목록을 모두에게 알리고, 시그널(rtc)은 상대 한 사람에게만 건넨다 — 절대 방 전체로 뿌리지 않는다.
+ * 소리 자체는 서버를 거치지 않는다.
+ */
+function handleVoice(ws, session, msg) {
+  const voice = voices.get(session.roomCode);
+  if (!voice) return fail(ws, '방이 사라졌습니다.', true);
+  const me = session.playerId;
+
+  if (msg.type === 'voiceState') return send(ws, voiceStateOf(session.roomCode));
+  if (msg.type === 'voice') {
+    if (msg.on) rtc.join(voice, me);
+    else rtc.leave(voice, me);
+    return broadcastRoom(session.roomCode, voiceStateOf(session.roomCode));
+  }
+
+  if (typeof msg.to !== 'string' || typeof msg.data !== 'object' || msg.data === null) {
+    return fail(ws, '잘못된 시그널링 요청입니다.');
+  }
+  if (!rtc.canRelay(voice, me, msg.to)) return fail(ws, '음성에 참여한 사람에게만 연결할 수 있습니다.');
+  if (JSON.stringify(msg.data).length > rtc.RTC_DATA_MAX) return fail(ws, '시그널링 데이터가 너무 큽니다.');
+  for (const [otherWs, other] of sessions) {
+    if (other.roomCode === session.roomCode && other.playerId === msg.to) {
+      return send(otherWs, { type: 'rtc', from: me, data: msg.data });
+    }
+  }
 }
 
 function handle(ws, session, msg) {
@@ -134,9 +179,12 @@ function handleEntry(ws, msg) {
     }
     const back = game.reconnect(room, msg.token);
     if (!back.ok) return reject(back.error);
+    // 새 페이지는 이전 페이지의 음성 연결을 이어받을 수 없다. 참여 중이었다면 빠진 것으로 하고 남은 사람들에게 알린다.
+    if (rtc.leave(voices.get(code), msg.token)) broadcastRoom(code, voiceStateOf(code));
     sessions.set(ws, { roomCode: code, playerId: msg.token, name: back.player.name });
     send(ws, { type: 'joined', playerId: msg.token, code });
     send(ws, chatHistoryOf(code));
+    send(ws, voiceStateOf(code));
     publish(room);
     return;
   }
@@ -147,6 +195,7 @@ function handleEntry(ws, msg) {
   sessions.set(ws, { roomCode: code, playerId, name: joined.player.name });
   send(ws, { type: 'joined', playerId, code });
   send(ws, chatHistoryOf(code));
+  send(ws, voiceStateOf(code));
   publish(room);
 }
 
@@ -154,7 +203,7 @@ function handleEntry(ws, msg) {
 export function resetRooms() {
   for (const room of rooms.values()) {
     game.resetRoom(room);
-    chats.set(room.code, chat.createChat());
+    resetSocial(room.code);
   }
 }
 
@@ -190,6 +239,7 @@ export function createServer() {
         return fail(ws, '먼저 방에 입장하세요.', true);
       }
       if (msg.type === 'chat' || msg.type === 'chatHistory') return handleChat(ws, session, msg);
+      if (msg.type === 'voice' || msg.type === 'voiceState' || msg.type === 'rtc') return handleVoice(ws, session, msg);
       handle(ws, session, msg);
     });
 
@@ -200,9 +250,11 @@ export function createServer() {
       if (!session) return;
       const room = rooms.get(session.roomCode);
       if (!room) return;
+      // 연결이 끊긴 사람은 음성에서도 빠진다. 남은 사람들이 그 사람과의 피어 연결을 닫을 수 있게 알린다.
+      if (rtc.leave(voices.get(room.code), session.playerId)) broadcastRoom(room.code, voiceStateOf(room.code));
       game.disconnect(room, session.playerId, Date.now());
-      // 대기실이 비면 채팅도 바로 비운다 — 다음에 들어오는 다른 사람들에게 이전 대화가 보이지 않게.
-      if (room.phase === 'lobby' && game.connectedPlayers(room).length === 0) chats.set(room.code, chat.createChat());
+      // 대기실이 비면 채팅·음성도 바로 비운다 — 다음에 들어오는 다른 사람들에게 이전 대화가 보이지 않게.
+      if (room.phase === 'lobby' && game.connectedPlayers(room).length === 0) resetSocial(room.code);
       publish(room);
     });
   });
@@ -222,7 +274,7 @@ export function createServer() {
       const waited = now - (room.lastSeenAt ?? room.createdAt);
       if (room.phase === 'gameEnd' || (room.phase !== 'lobby' && waited > EMPTY_ROOM_RESET)) {
         game.resetRoom(room, now);
-        chats.set(room.code, chat.createChat());
+        resetSocial(room.code);
         room.lastSeenAt = now;
         broadcastLobby();
       }

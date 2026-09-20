@@ -41,7 +41,38 @@
 }
 .chat__head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; }
 .chat__title { font-size: 14px; color: var(--muted); font-weight: 600; white-space: nowrap; }
-.chat__tools { flex: 1; display: flex; justify-content: flex-end; gap: 6px; } /* 음성 컨트롤이 들어갈 자리 */
+.chat__tools { flex: 1; display: flex; justify-content: flex-end; align-items: center; gap: 6px; }
+
+/* 음성 컨트롤. 참여 전엔 버튼 하나, 참여 후엔 🎤 🔊 끊기 */
+.chat__tools .chat__tool { min-height: 32px; padding: 4px 10px; font-size: 13px; gap: 4px; }
+.chat__tool.is-off { border-color: var(--no); color: var(--no); background: rgba(255, 92, 108, 0.12); }
+.chat__tool--leave { color: var(--muted); }
+.chat-toggle__voice {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--yes);
+  border: 2px solid var(--bg);
+}
+/* 지금 음성에 있는 사람들 */
+.chat__voice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  font-size: 12px;
+  color: var(--muted);
+}
+.chat__voice > span:first-child { margin-right: 2px; }
+.chat__voice-count { margin-left: 4px; }
+.chat__voice-error { flex: none; margin: 0; font-size: 12px; color: var(--no); }
 .chat__list {
   flex: 1;
   min-height: 0;
