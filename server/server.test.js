@@ -1,7 +1,7 @@
 // 실제 WebSocket 서버를 띄우고 여러 클라이언트로 한 라운드를 끝까지 돌린다.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import WebSocket from 'ws';
-import { createServer, resetRooms } from './index.js';
+import { createServer, resetRooms, WS_DATA_MAX } from './index.js';
 import { RTC_DATA_MAX } from './rtc.js';
 
 let server;
@@ -58,6 +58,13 @@ const isState = (phase) => (m) => m.type === 'state' && m.state.phase === phase;
 const latestRooms = (client) => [...client.inbox].reverse().find((m) => m.type === 'rooms')?.rooms;
 
 describe('WebSocket 서버 (고정 3개 방)', () => {
+  it('과도하게 큰 요청은 JSON 파싱 전에 연결을 닫는다', async () => {
+    const a = await connect();
+    const closed = new Promise((resolve) => a.ws.once('close', resolve));
+    a.ws.send('x'.repeat(WS_DATA_MAX + 1));
+    expect(await closed).toBe(1009);
+  });
+
   it('접속하면 방 목록 3개를 바로 받는다', async () => {
     const a = await connect();
     const list = (await a.wait((m) => m.type === 'rooms')).rooms;

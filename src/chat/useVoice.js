@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 // 참여했던 기억. 자동 재참여는 하지 않는다(권한·자동재생 정책에 걸린다) — 버튼 문구로 힌트만 준다.
 const VOICE_KEY = 'livechat.voice';
 const AUDIO = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+const PEER_RETRY_MS = 1000;
 
 function loadRemembered() {
   try {
@@ -52,10 +53,14 @@ export function useVoice({ send, subscribe, you }) {
   const micOnRef = useRef(true);
   const membersRef = useRef([]);
   const localRef = useRef(null); // 내 마이크 MediaStream
-  const peersRef = useRef(new Map()); // id → { pc, pending: 원격 설명 전에 도착한 ICE 후보 }
+  const peersRef = useRef(new Map()); // id → { pc, pending, retry }
+  const retryTimersRef = useRef(new Map()); // id → 재연결 타이머
 
-  const dropPeer = useCallback((id) => {
+  const dropPeer = useCallback((id, expectedPc) => {
     const entry = peersRef.current.get(id);
+    if (expectedPc && entry?.pc !== expectedPc) return false; // 이전 연결의 늦은 실패가 새 연결을 닫지 않게 한다
+    clearTimeout(retryTimersRef.current.get(id));
+    retryTimersRef.current.delete(id);
     if (!entry) return;
     peersRef.current.delete(id);
     entry.pc.onicecandidate = null;
@@ -68,13 +73,30 @@ export function useVoice({ send, subscribe, you }) {
       next.delete(id);
       return next;
     });
+    return true;
   }, []);
 
   const createPeer = useCallback(
     (id) => {
+      const existing = peersRef.current.get(id);
+      if (existing) return existing;
       const pc = new RTCPeerConnection({ iceServers: iceServers() });
-      const entry = { pc, pending: [] };
+      const entry = { pc, pending: [], retry: null };
       peersRef.current.set(id, entry);
+
+      // 양쪽에 재협상을 알리고 같은 참여자끼리 새 피어를 만든다. id가 앞선 쪽만 offer하므로 glare는 생기지 않는다.
+      entry.retry = (notify = true) => {
+        if (!dropPeer(id, pc) || !joinedRef.current || !membersRef.current.some((m) => m.id === id)) return;
+        setError('음성 연결을 다시 연결하는 중…');
+        if (notify) send({ type: 'rtc', to: id, data: { restart: true } });
+        const timer = setTimeout(() => {
+          retryTimersRef.current.delete(id);
+          if (joinedRef.current && membersRef.current.some((m) => m.id === id) && !peersRef.current.has(id)) {
+            createPeer(id);
+          }
+        }, PEER_RETRY_MS);
+        retryTimersRef.current.set(id, timer);
+      };
 
       const local = localRef.current;
       local?.getTracks().forEach((track) => pc.addTrack(track, local));
@@ -84,9 +106,10 @@ export function useVoice({ send, subscribe, you }) {
       pc.ontrack = (e) => {
         const stream = e.streams[0] ?? new MediaStream([e.track]);
         setStreams((prev) => new Map(prev).set(id, stream));
+        setError(null);
       };
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') dropPeer(id);
+        if (pc.connectionState === 'failed') entry.retry();
       };
 
       // 양쪽이 동시에 offer를 보내 충돌(glare)하지 않도록 id가 앞선 쪽만 offer 한다. 뒤쪽은 offer를 기다린다.
@@ -96,7 +119,7 @@ export function useVoice({ send, subscribe, you }) {
             await pc.setLocalDescription(offer);
             send({ type: 'rtc', to: id, data: { sdp: pc.localDescription.toJSON() } });
           })
-          .catch(() => dropPeer(id));
+          .catch(() => entry.retry());
       }
       return entry;
     },
@@ -106,6 +129,8 @@ export function useVoice({ send, subscribe, you }) {
   /** 피어와 마이크를 모두 내려놓는다. 참여 상태 플래그는 호출한 쪽이 정한다. */
   const teardown = useCallback(() => {
     for (const id of [...peersRef.current.keys()]) dropPeer(id);
+    for (const timer of retryTimersRef.current.values()) clearTimeout(timer);
+    retryTimersRef.current.clear();
     localRef.current?.getTracks().forEach((t) => t.stop());
     localRef.current = null;
     setStreams(new Map());
@@ -141,7 +166,9 @@ export function useVoice({ send, subscribe, you }) {
       const entry = peersRef.current.get(from) ?? createPeer(from);
       const { pc } = entry;
       try {
-        if (data.sdp) {
+        if (data.restart) {
+          entry.retry(false);
+        } else if (data.sdp) {
           await pc.setRemoteDescription(data.sdp);
           if (data.sdp.type === 'offer') {
             await pc.setLocalDescription(await pc.createAnswer());
@@ -153,7 +180,7 @@ export function useVoice({ send, subscribe, you }) {
           else entry.pending.push(data.candidate);
         }
       } catch {
-        /* 상대가 나가는 중이거나 순서가 어긋난 신호. 다음 참여자 목록 갱신에서 정리된다 */
+        entry.retry();
       }
     },
     [send, createPeer],

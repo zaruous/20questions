@@ -15,6 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
 const ROOM_COUNT = Number(process.env.ROOM_COUNT ?? 3); // 서버가 여는 방의 개수(고정)
 const EMPTY_ROOM_RESET = 60 * 1000; // 아무도 없는 방을 대기실로 되돌리기까지
+export const WS_DATA_MAX = 32 * 1024; // JSON 파싱 전에 막는 클라이언트 요청 전체 크기 상한
 
 /** 서버 시작 시 방을 미리 만들어 두고, 이후로는 생성/삭제하지 않는다. */
 const rooms = new Map(
@@ -218,9 +219,11 @@ export function createServer() {
   });
 
   const server = http.createServer(app);
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({ server, path: '/ws', maxPayload: WS_DATA_MAX });
 
   wss.on('connection', (ws) => {
+    // 잘못된/과도한 프레임은 해당 연결만 닫는다. error 이벤트를 방치하면 프로세스까지 종료될 수 있다.
+    ws.on('error', () => {});
     lobbySockets.add(ws);
     send(ws, { type: 'rooms', rooms: roomList() }); // 첫 화면에 보여줄 방 목록
 
