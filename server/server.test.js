@@ -249,3 +249,55 @@ describe('WebSocket 서버 (고정 3개 방)', () => {
     [...clientsInRoom, ninth].forEach((client) => client.close());
   });
 });
+
+describe('라이브채팅 (게임 상태와 분리)', () => {
+  it('채팅은 전용 메시지로 오가고, 게임 상태 스냅샷에는 실리지 않는다', async () => {
+    const a = await connect();
+    const b = await connect();
+    a.send({ type: 'join', code: '2', name: '가' });
+    b.send({ type: 'join', code: '2', name: '나' });
+    await a.wait((m) => m.type === 'state' && m.state.players.length === 2);
+
+    a.send({ type: 'chat', text: '  안녕하세요  ' });
+    const got = await b.wait((m) => m.type === 'chat');
+    expect(got.message).toMatchObject({ name: '가', text: '안녕하세요' });
+    expect((await a.wait((m) => m.type === 'chat')).message).toEqual(got.message);
+    expect(a.latest()).not.toHaveProperty('chat');
+
+    b.send({ type: 'chat', text: '' });
+    await b.wait((m) => m.type === 'error' && m.message.includes('메시지'));
+
+    [a, b].forEach((c) => c.close());
+  });
+
+  it('늦게 들어온 사람과 토큰으로 돌아온 사람은 이전 대화를 받는다', async () => {
+    const a = await connect();
+    a.send({ type: 'join', code: '3', name: '방장' });
+    await a.wait((m) => m.type === 'joined');
+    a.send({ type: 'chat', text: '첫 마디' });
+    await a.wait((m) => m.type === 'chat');
+
+    // 늦게 들어온 사람: 입장 직후 이력을 받는다
+    const b = await connect();
+    b.send({ type: 'join', code: '3', name: '손님' });
+    const bJoined = await b.wait((m) => m.type === 'joined');
+    const history = await b.wait((m) => m.type === 'chatHistory');
+    expect(history.messages.map((m) => m.text)).toEqual(['첫 마디']);
+    expect(history.textMax).toBeGreaterThan(0);
+
+    // 패널이 늦게 열려도 요청하면 다시 받는다
+    b.send({ type: 'chatHistory' });
+    await b.wait(() => b.inbox.filter((m) => m.type === 'chatHistory').length === 2);
+
+    // 게임 중 끊겼다가 토큰으로 돌아온 사람도 받는다 (대기실에서는 자리가 사라지므로 게임을 먼저 시작)
+    await a.wait((m) => m.type === 'state' && m.state.players.length === 2);
+    a.send({ type: 'start' });
+    await b.wait(isState('secret'));
+    b.close();
+    const back = await connect();
+    back.send({ type: 'join', code: '3', token: bJoined.playerId });
+    expect((await back.wait((m) => m.type === 'chatHistory')).messages).toHaveLength(1);
+
+    [a, back].forEach((c) => c.close());
+  });
+});

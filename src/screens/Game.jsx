@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Avatar from '../components/Avatar.jsx';
+import LiveChat from '../chat/LiveChat.jsx';
 
 const VERDICT_LABEL = { yes: '예', no: '아니오', unclear: '애매함' };
 const RESULT_TEXT = {
@@ -26,21 +28,6 @@ function useCountdown(deadline, serverNow) {
 }
 
 const mmss = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
-
-/** 이름으로 색을 정한다. 서버를 거치지 않아도 모든 사람의 화면에서 같은 사람이 같은 색으로 보인다. */
-function hueOf(name) {
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) % 360;
-  return h;
-}
-
-function Avatar({ name, size }) {
-  return (
-    <span className={`avatar${size ? ` avatar--${size}` : ''}`} style={{ '--h': hueOf(name) }} aria-hidden="true">
-      {[...name][0]}
-    </span>
-  );
-}
 
 /** 지정한 사람부터 시작하도록 입장 순서를 돌린 결과. 서버 startGame과 같은 규칙(표시용). */
 function turnOrder(players, firstId) {
@@ -70,7 +57,7 @@ function situation(state, nameOf, isAnswerer, pending) {
   }
 }
 
-export default function Game({ state, send, leaveRoom, serverNow }) {
+export default function Game({ state, send, subscribe, leaveRoom, serverNow }) {
   const left = useCountdown(state.deadline, serverNow);
   const nameOf = (id) => state.players.find((p) => p.id === id)?.name ?? '???';
   const isHost = state.you === state.hostId;
@@ -79,8 +66,10 @@ export default function Game({ state, send, leaveRoom, serverNow }) {
   const pending = state.questions.find((q) => q.id === state.pendingId) ?? null;
   const now = inLobby ? null : situation(state, nameOf, isAnswerer, pending);
 
+  const [chatOpen, setChatOpen] = useState(false); // 채팅 패널이 열려 있으면 오른쪽에 자리를 비워준다(has-chat)
+
   return (
-    <main className="game">
+    <main className={`game${chatOpen ? ' has-chat' : ''}`}>
       <header className="game__header">
         {/* 대기실은 본문에 방 이름을 크게 띄우므로 헤더에서는 뺀다 */}
         {!inLobby && (
@@ -97,6 +86,7 @@ export default function Game({ state, send, leaveRoom, serverNow }) {
             {mmss(left)}
           </span>
         )}
+        <LiveChat send={send} subscribe={subscribe} you={state.you} onOpenChange={setChatOpen} />
         <button className="btn btn--ghost btn--sm" onClick={leaveRoom}>
           나가기
         </button>

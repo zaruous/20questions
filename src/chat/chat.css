@@ -1,0 +1,90 @@
+/* 라이브채팅. 색·간격 토큰은 styles.css의 것을 쓰고, 자리는 여기서 잡는다:
+   폰에서는 아래에서 올라오는 시트로 게임 화면을 덮고, 넓은 화면에서는 .game.has-chat이 비워둔 오른쪽 자리에 붙는다. */
+
+.chat-toggle { position: relative; }
+.chat-toggle.is-on { border-color: var(--secondary); color: var(--secondary); }
+.chat-toggle__label { display: none; }
+.chat-toggle__badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--secondary);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+}
+
+.chat-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.45); }
+.chat {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  height: 60vh;
+  height: 60dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.4);
+}
+.chat__head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.chat__title { font-size: 14px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.chat__tools { flex: 1; display: flex; justify-content: flex-end; gap: 6px; } /* 음성 컨트롤이 들어갈 자리 */
+.chat__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chat__empty { color: var(--muted); text-align: center; padding: 24px 12px; font-size: 14px; }
+.chat__msg { display: flex; align-items: flex-start; gap: 8px; }
+.chat__msg.is-mine { flex-direction: row-reverse; }
+.chat__body { min-width: 0; max-width: 85%; padding: 6px 10px; background: var(--panel-2); border: 1px solid transparent; border-radius: 12px; }
+.chat__msg.is-mine .chat__body { background: rgba(139, 125, 255, 0.18); border-color: rgba(139, 125, 255, 0.45); }
+.chat__meta { display: flex; gap: 8px; align-items: baseline; font-size: 11px; color: var(--muted); }
+.chat__meta b { color: var(--text); font-size: 12px; }
+.chat__text { margin: 1px 0 0; font-size: 14px; overflow-wrap: anywhere; }
+.chat__form { flex: none; display: flex; gap: 8px; }
+.chat__form .input { flex: 1; min-height: 40px; }
+.chat__form .btn { flex: none; min-height: 40px; }
+
+@media (min-width: 720px) {
+  .chat-toggle__label { display: inline; }
+}
+
+/* 채팅을 옆에 붙일 만큼 넓을 때. 기준은 position: relative인 .game.has-chat (styles.css) */
+@media (min-width: 1024px) {
+  .chat-backdrop { display: none; }
+  .chat {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    bottom: 16px;
+    left: auto;
+    width: 320px;
+    height: auto;
+    z-index: auto;
+    border-bottom: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    box-shadow: none;
+  }
+}

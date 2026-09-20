@@ -1,5 +1,5 @@
 // WebSocket 서버 (I/O 계층).
-// 게임 규칙은 game.js에만 있고, 여기서는 연결/방 목록/브로드캐스트/시간만 다룬다.
+// 게임 규칙은 game.js, 라이브채팅은 chat.js에 있고, 여기서는 연결/방 목록/브로드캐스트/시간만 다룬다.
 import http from 'node:http';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import * as game from './game.js';
+import * as chat from './chat.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
@@ -20,7 +21,10 @@ const rooms = new Map(
     return [code, game.createRoom(code)];
   }),
 );
-/** @type {Map<import('ws').WebSocket, {roomCode: string, playerId: string}>} */
+/** 방마다 하나씩 두는 채팅 기록. 게임 상태(rooms)와 따로 살고, 방이 대기실로 되돌아갈 때 함께 비운다. */
+const chats = new Map([...rooms.keys()].map((code) => [code, chat.createChat()]));
+const chatHistoryOf = (code) => ({ type: 'chatHistory', messages: chats.get(code).messages, textMax: chat.CHAT_TEXT_MAX });
+/** @type {Map<import('ws').WebSocket, {roomCode: string, playerId: string, name: string}>} */
 const sessions = new Map();
 /** 열려 있는 모든 연결. 이 중 sessions에 없는 것이 '아직 방을 고르는 중'인 사람이다. */
 const lobbySockets = new Set();
@@ -52,6 +56,24 @@ function broadcastLobby() {
   for (const ws of lobbySockets) {
     if (!sessions.has(ws)) send(ws, { type: 'rooms', rooms: rows });
   }
+}
+
+/** 같은 방의 모든 연결에 보낸다. 게임 상태(viewFor)를 거치지 않는 메시지용. */
+function broadcastRoom(roomCode, payload) {
+  for (const [ws, session] of sessions) {
+    if (session.roomCode === roomCode) send(ws, payload);
+  }
+}
+
+/** 라이브채팅. 게임 규칙과 무관하므로 방 상태를 읽지 않고, 세션에 적어둔 이름만 쓴다. */
+function handleChat(ws, session, msg) {
+  const log = chats.get(session.roomCode);
+  if (!log) return fail(ws, '방이 사라졌습니다.', true);
+  if (msg.type === 'chatHistory') return send(ws, chatHistoryOf(session.roomCode));
+
+  const result = chat.postMessage(log, { by: session.playerId, name: session.name }, msg.text);
+  if (!result.ok) return fail(ws, result.error);
+  broadcastRoom(session.roomCode, { type: 'chat', message: result.message });
 }
 
 function handle(ws, session, msg) {
@@ -112,8 +134,9 @@ function handleEntry(ws, msg) {
     }
     const back = game.reconnect(room, msg.token);
     if (!back.ok) return reject(back.error);
-    sessions.set(ws, { roomCode: code, playerId: msg.token });
+    sessions.set(ws, { roomCode: code, playerId: msg.token, name: back.player.name });
     send(ws, { type: 'joined', playerId: msg.token, code });
+    send(ws, chatHistoryOf(code));
     publish(room);
     return;
   }
@@ -121,14 +144,18 @@ function handleEntry(ws, msg) {
   const playerId = randomId();
   const joined = game.joinRoom(room, { id: playerId, name });
   if (!joined.ok) return reject(joined.error);
-  sessions.set(ws, { roomCode: code, playerId });
+  sessions.set(ws, { roomCode: code, playerId, name: joined.player.name });
   send(ws, { type: 'joined', playerId, code });
+  send(ws, chatHistoryOf(code));
   publish(room);
 }
 
 /** 테스트 전용: 모든 방을 빈 대기실로 되돌린다. 방이 고정이라 테스트끼리 상태가 섞이기 때문. */
 export function resetRooms() {
-  for (const room of rooms.values()) game.resetRoom(room);
+  for (const room of rooms.values()) {
+    game.resetRoom(room);
+    chats.set(room.code, chat.createChat());
+  }
 }
 
 export function createServer() {
@@ -162,6 +189,7 @@ export function createServer() {
         if (msg.type === 'join') return handleEntry(ws, msg);
         return fail(ws, '먼저 방에 입장하세요.', true);
       }
+      if (msg.type === 'chat' || msg.type === 'chatHistory') return handleChat(ws, session, msg);
       handle(ws, session, msg);
     });
 
@@ -173,6 +201,8 @@ export function createServer() {
       const room = rooms.get(session.roomCode);
       if (!room) return;
       game.disconnect(room, session.playerId, Date.now());
+      // 대기실이 비면 채팅도 바로 비운다 — 다음에 들어오는 다른 사람들에게 이전 대화가 보이지 않게.
+      if (room.phase === 'lobby' && game.connectedPlayers(room).length === 0) chats.set(room.code, chat.createChat());
       publish(room);
     });
   });
@@ -192,6 +222,7 @@ export function createServer() {
       const waited = now - (room.lastSeenAt ?? room.createdAt);
       if (room.phase === 'gameEnd' || (room.phase !== 'lobby' && waited > EMPTY_ROOM_RESET)) {
         game.resetRoom(room, now);
+        chats.set(room.code, chat.createChat());
         room.lastSeenAt = now;
         broadcastLobby();
       }

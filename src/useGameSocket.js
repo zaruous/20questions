@@ -29,6 +29,7 @@ export function useGameSocket() {
   const entryRef = useRef(loadSeat()); // 연결되면 바로 보낼 입장 요청
   const offsetRef = useRef(0); // 서버 시각 - 내 시각 (타이머 오차 보정)
   const retryRef = useRef(0);
+  const listenersRef = useRef(new Map()); // type → Set<handler>. 게임 상태와 무관한 메시지(채팅 등)를 밖으로 넘긴다
 
   useEffect(() => {
     let disposed = false;
@@ -77,6 +78,7 @@ export function useGameSocket() {
             setState(null);
           }
         }
+        listenersRef.current.get(msg.type)?.forEach((handler) => handler(msg));
       };
 
       ws.onerror = () => ws.close();
@@ -129,5 +131,13 @@ export function useGameSocket() {
 
   const serverNow = useCallback(() => Date.now() + offsetRef.current, []);
 
-  return { state, rooms, status, notice, setNotice, send, joinRoom, leaveRoom, serverNow };
+  /** 특정 타입의 서버 메시지를 구독한다. 해제 함수를 돌려준다. */
+  const subscribe = useCallback((type, handler) => {
+    const handlers = listenersRef.current.get(type) ?? new Set();
+    handlers.add(handler);
+    listenersRef.current.set(type, handlers);
+    return () => handlers.delete(handler);
+  }, []);
+
+  return { state, rooms, status, notice, setNotice, send, joinRoom, leaveRoom, serverNow, subscribe };
 }

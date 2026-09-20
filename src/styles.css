@@ -388,3 +388,8 @@ label.roster__card:hover { filter: brightness(1.08); }
   .hero h1 { font-size: 64px; }
   .lobby__room { font-size: 64px; }
 }
+
+/* 라이브채팅 패널(src/chat/chat.css)이 오른쪽에 붙을 자리. 패널은 .game 기준 absolute라 여기서는 폭만 비워둔다. */
+@media (min-width: 1024px) {
+  .game.has-chat { position: relative; max-width: 1340px; padding-right: calc(20px + 320px + 12px); }
+}
