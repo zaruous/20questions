@@ -126,7 +126,7 @@ describe('WebSocket 서버 (고정 3개 방)', () => {
 
     a.send({ type: 'start' });
     await c.wait(isState('secret'));
-    a.send({ type: 'secret', text: '고양이' });
+    a.send({ type: 'secret', text: '고양이', category: '동물' });
     await b.wait(isState('asking'));
 
     // 정답 단어는 출제자에게만 전달된다

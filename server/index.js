@@ -69,7 +69,7 @@ function handle(ws, session, msg) {
       result = game.startGame(room, me, now);
       break;
     case 'secret':
-      result = game.setSecret(room, me, msg.text, now);
+      result = game.setSecret(room, me, msg.text, msg.category, now);
       break;
     case 'ask':
       result = game.askQuestion(room, me, msg.text, now);

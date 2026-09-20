@@ -112,6 +112,11 @@ export default function Game({ state, send, leaveRoom, serverNow }) {
             {(state.phase === 'asking' || state.phase === 'roundEnd') && (
               <Budget used={state.used} max={state.maxQuestions} />
             )}
+            {state.category && (
+              <p className="topic-badge">
+                주제 <b>{state.category}</b>
+              </p>
+            )}
             <p className={`status${now.mine ? ' is-mine' : ''}`} aria-live="polite">
               {now.text}
             </p>
@@ -123,7 +128,12 @@ export default function Game({ state, send, leaveRoom, serverNow }) {
             <footer className="actions">
               {state.phase === 'secret' &&
                 (isAnswerer ? (
-                  <SecretForm send={send} max={state.limits.secretMax} />
+                  <SecretForm
+                    send={send}
+                    max={state.limits.secretMax}
+                    choices={state.categoryChoices}
+                    categoryMax={state.limits.categoryMax}
+                  />
                 ) : (
                   <p className="hint actions__wait">단어가 정해지면 바로 질문할 수 있어요.</p>
                 ))}
@@ -358,30 +368,65 @@ function Feed({ state, nameOf, isAnswerer }) {
   );
 }
 
-function SecretForm({ send, max }) {
+function SecretForm({ send, max, choices, categoryMax }) {
   const [text, setText] = useState('');
+  const [picked, setPicked] = useState(choices[0] ?? '');
+  const [custom, setCustom] = useState('');
+  const category = custom.trim() || picked; // 직접 입력한 주제가 있으면 그쪽이 우선
+
   return (
     <form
-      className="action-form"
+      className="secret-form"
       onSubmit={(e) => {
         e.preventDefault();
-        if (text.trim()) send({ type: 'secret', text });
+        if (text.trim() && category) send({ type: 'secret', text, category });
       }}
     >
-      <input
-        className="input"
-        aria-label="맞힐 단어"
-        value={text}
-        maxLength={max}
-        placeholder="맞힐 단어… 예: 고양이"
-        autoComplete="off"
-        enterKeyHint="done"
-        autoFocus
-        onChange={(e) => setText(e.target.value)}
-      />
-      <button className="btn btn--primary" type="submit" disabled={!text.trim()}>
-        확정
-      </button>
+      <fieldset className="topics">
+        <legend className="topics__label">주제 고르기 · 추측자에게도 보여요</legend>
+        <div className="topics__chips">
+          {choices.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`chip${category === c ? ' is-on' : ''}`}
+              aria-pressed={category === c}
+              onClick={() => {
+                setPicked(c);
+                setCustom('');
+              }}
+            >
+              {c}
+            </button>
+          ))}
+          <input
+            className="chip chip--input"
+            aria-label="주제 직접 입력"
+            value={custom}
+            maxLength={categoryMax}
+            placeholder="직접 입력"
+            autoComplete="off"
+            onChange={(e) => setCustom(e.target.value)}
+          />
+        </div>
+      </fieldset>
+
+      <div className="action-form">
+        <input
+          className="input"
+          aria-label="맞힐 단어"
+          value={text}
+          maxLength={max}
+          placeholder="맞힐 단어… 예: 고양이"
+          autoComplete="off"
+          enterKeyHint="done"
+          autoFocus
+          onChange={(e) => setText(e.target.value)}
+        />
+        <button className="btn btn--primary" type="submit" disabled={!text.trim() || !category}>
+          확정
+        </button>
+      </div>
     </form>
   );
 }

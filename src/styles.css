@@ -292,6 +292,37 @@ h1, h2, h3, .result__headline { text-wrap: balance; }
 .action-form .btn { flex: none; min-width: 72px; }
 .action-form + .action-form { margin-top: 8px; }
 
+/* ---------- 주제 ---------- */
+/* 모두가 보는 이번 라운드의 범위. 단어는 숨겨도 이건 질문의 출발점이라 드러낸다. */
+.topic-badge {
+  flex: none;
+  margin: 0;
+  align-self: flex-start;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(139, 125, 255, 0.16);
+  border: 1px solid var(--secondary);
+  color: var(--muted);
+  font-size: 12px;
+}
+.topic-badge b { color: var(--text); font-size: 14px; margin-left: 4px; }
+
+.topics { margin: 0 0 10px; padding: 0; border: 0; }
+.topics__label { padding: 0; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+.topics__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+.chip.is-on { background: var(--secondary); border-color: var(--secondary); color: #16122b; font-weight: 700; }
+.chip--input { width: 96px; cursor: text; }
+.chip--input::placeholder { color: var(--muted); }
+
 .answer-panel__secret { margin: 0 0 10px; text-align: center; color: var(--muted); font-size: 14px; }
 .answer-panel__secret b { color: var(--primary); font-family: var(--font-display); font-weight: 400; font-size: 20px; margin-left: 6px; }
 .answer-panel__q { margin: 0 0 10px; padding: 12px 14px; background: var(--panel-2); border-radius: 12px; font-size: 17px; overflow-wrap: anywhere; }

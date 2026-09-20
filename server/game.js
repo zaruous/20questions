@@ -13,6 +13,27 @@ export const NAME_MAX = 12;
 export const SECRET_MAX = 40;
 export const TEXT_MAX = 200;
 
+export const CATEGORY_MAX = 12;
+export const CATEGORY_CHOICES = 5; // 매 라운드 출제자에게 보여줄 후보 개수
+
+// 출제자가 단어와 함께 고르는 주제. 추측자에게도 공개되어 질문의 출발점이 된다.
+// 20개를 두고 라운드마다 무작위로 CATEGORY_CHOICES개만 보여준다(직접 입력도 가능).
+export const CATEGORY_POOL = [
+  '동물', '음식', '사물', '인물', '장소', '자연', '직업', '스포츠',
+  '영화·드라마', '게임', '캐릭터', '브랜드', '탈것', '과일·채소',
+  '악기', '감정', '색깔', '나라', '학교', '신체',
+];
+
+/** 주제 후보 뽑기. 무작위성을 주입받아 테스트에서 고정할 수 있게 한다. */
+export function pickCategoryChoices(rng = Math.random, count = CATEGORY_CHOICES) {
+  const pool = [...CATEGORY_POOL];
+  const picked = [];
+  while (picked.length < count && pool.length) {
+    picked.push(...pool.splice(Math.floor(rng() * pool.length), 1));
+  }
+  return picked;
+}
+
 const ok = (extra = {}) => ({ ok: true, ...extra });
 const err = (message) => ({ ok: false, error: message });
 
@@ -36,6 +57,8 @@ export function createRoom(code, name = `${code}번 방`, now = Date.now()) {
     roundIndex: -1,
     answererId: null,
     secret: null,
+    category: null, // 출제자가 고른 주제. 단어와 달리 모두에게 공개된다
+    categoryChoices: [], // 이번 라운드 출제자에게 보여줄 주제 후보
     questions: [], // { id, by, text, verdict: 'yes'|'no'|'unclear'|null }
     guesses: [], // { by, text, correct }
     pendingId: null, // 판정 대기 중인 질문 id (동시에 1개만)
@@ -156,6 +179,8 @@ export function startRound(room, now = Date.now()) {
   room.roundIndex = next;
   room.answererId = room.roster[next];
   room.secret = null;
+  room.category = null;
+  room.categoryChoices = pickCategoryChoices();
   room.questions = [];
   room.guesses = [];
   room.pendingId = null;
@@ -165,14 +190,18 @@ export function startRound(room, now = Date.now()) {
   return ok();
 }
 
-export function setSecret(room, playerId, text, now = Date.now()) {
+export function setSecret(room, playerId, text, category, now = Date.now()) {
   if (room.phase !== 'secret') return err('지금은 단어를 정할 수 없습니다.');
   if (playerId !== room.answererId) return err('출제자만 단어를 정할 수 있습니다.');
   const clean = String(text ?? '').trim();
   if (!clean) return err('단어를 입력하세요.');
   if (clean.length > SECRET_MAX) return err(`단어는 ${SECRET_MAX}자 이하로 입력하세요.`);
+  const topic = String(category ?? '').trim();
+  if (!topic) return err('주제를 고르거나 직접 입력하세요.');
+  if (topic.length > CATEGORY_MAX) return err(`주제는 ${CATEGORY_MAX}자 이하로 입력하세요.`);
 
   room.secret = clean;
+  room.category = topic;
   room.phase = 'asking';
   room.deadline = now + ROUND_SECONDS * 1000;
   return ok();
@@ -260,6 +289,8 @@ export function restart(room, byId) {
   room.roundIndex = -1;
   room.answererId = null;
   room.secret = null;
+  room.category = null;
+  room.categoryChoices = [];
   room.questions = [];
   room.guesses = [];
   room.pendingId = null;
@@ -346,7 +377,16 @@ export function viewFor(room, playerId) {
     pendingId: room.pendingId,
     deadline: room.deadline,
     secret: isAnswerer || revealed ? room.secret : null,
+    category: room.category, // 단어와 달리 추측자에게도 보인다
+    categoryChoices: isAnswerer ? room.categoryChoices : [],
     lastResult: revealed ? room.lastResult : null,
-    limits: { minPlayers: MIN_PLAYERS, maxPlayers: MAX_PLAYERS, nameMax: NAME_MAX, secretMax: SECRET_MAX, textMax: TEXT_MAX },
+    limits: {
+      minPlayers: MIN_PLAYERS,
+      maxPlayers: MAX_PLAYERS,
+      nameMax: NAME_MAX,
+      secretMax: SECRET_MAX,
+      textMax: TEXT_MAX,
+      categoryMax: CATEGORY_MAX,
+    },
   };
 }

@@ -69,7 +69,7 @@ describe('정답 단어 비공개', () => {
   beforeEach(() => {
     room = roomWith(3);
     g.startGame(room, 'p0', T0);
-    g.setSecret(room, 'p0', '고양이', T0);
+    g.setSecret(room, 'p0', '고양이', '동물', T0);
   });
 
   it('출제자 화면에만 단어가 담긴다', () => {
@@ -93,9 +93,50 @@ describe('정답 단어 비공개', () => {
   it('출제자만 단어를 정할 수 있다', () => {
     const fresh = roomWith(2);
     g.startGame(fresh, 'p0', T0);
-    expect(g.setSecret(fresh, 'p1', '몰래', T0).ok).toBe(false);
-    expect(g.setSecret(fresh, 'p0', '', T0).ok).toBe(false);
-    expect(g.setSecret(fresh, 'p0', 'a'.repeat(g.SECRET_MAX + 1), T0).ok).toBe(false);
+    expect(g.setSecret(fresh, 'p1', '몰래', '동물', T0).ok).toBe(false);
+    expect(g.setSecret(fresh, 'p0', '', '동물', T0).ok).toBe(false);
+    expect(g.setSecret(fresh, 'p0', 'a'.repeat(g.SECRET_MAX + 1), '동물', T0).ok).toBe(false);
+  });
+});
+
+describe('주제', () => {
+  it('후보는 중복 없이 풀에서만 뽑힌다', () => {
+    const picked = g.pickCategoryChoices();
+    expect(picked).toHaveLength(g.CATEGORY_CHOICES);
+    expect(new Set(picked).size).toBe(g.CATEGORY_CHOICES);
+    expect(picked.every((c) => g.CATEGORY_POOL.includes(c))).toBe(true);
+  });
+
+  it('라운드마다 출제자에게 후보가 주어진다', () => {
+    const room = roomWith(2);
+    g.startGame(room, 'p0', T0);
+    expect(g.viewFor(room, 'p0').categoryChoices).toHaveLength(g.CATEGORY_CHOICES);
+    expect(g.viewFor(room, 'p1').categoryChoices).toEqual([]); // 추측자에겐 필요 없다
+  });
+
+  it('주제 없이는 단어를 확정할 수 없다', () => {
+    const room = roomWith(2);
+    g.startGame(room, 'p0', T0);
+    expect(g.setSecret(room, 'p0', '고양이', '', T0).ok).toBe(false);
+    expect(g.setSecret(room, 'p0', '고양이', 'a'.repeat(g.CATEGORY_MAX + 1), T0).ok).toBe(false);
+    expect(room.phase).toBe('secret');
+  });
+
+  it('후보에 없는 주제도 직접 쓸 수 있고, 단어와 달리 모두에게 보인다', () => {
+    const room = roomWith(2);
+    g.startGame(room, 'p0', T0);
+    g.setSecret(room, 'p0', '주전자', '부엌에 있는 것', T0);
+    expect(g.viewFor(room, 'p1').category).toBe('부엌에 있는 것');
+    expect(g.viewFor(room, 'p1').secret).toBeNull();
+  });
+
+  it('다음 라운드로 넘어가면 지난 주제는 남지 않는다', () => {
+    const room = roomWith(2);
+    g.startGame(room, 'p0', T0);
+    g.setSecret(room, 'p0', '고양이', '동물', T0);
+    g.endRound(room, 'timeout', T0);
+    g.startRound(room, T0);
+    expect(room.category).toBeNull();
   });
 });
 
@@ -104,7 +145,7 @@ describe('질문과 답변', () => {
   beforeEach(() => {
     room = roomWith(3);
     g.startGame(room, 'p0', T0);
-    g.setSecret(room, 'p0', '고양이', T0);
+    g.setSecret(room, 'p0', '고양이', '동물', T0);
   });
 
   it('답변 대기 중에는 다음 질문을 받지 않는다', () => {
@@ -141,7 +182,7 @@ describe('정답 추측', () => {
   beforeEach(() => {
     room = roomWith(3);
     g.startGame(room, 'p0', T0);
-    g.setSecret(room, 'p0', '고양이', T0);
+    g.setSecret(room, 'p0', '고양이', '동물', T0);
   });
 
   it('맞히면 추측자 3점, 출제자 1점을 받고 라운드가 끝난다', () => {
@@ -154,7 +195,7 @@ describe('정답 추측', () => {
   });
 
   it('공백과 문장부호, 대소문자는 무시하고 비교한다', () => {
-    g.setSecret(room, 'p0', 'Hot Dog!', T0); // 이미 asking 단계라 무시되는지도 함께 확인
+    g.setSecret(room, 'p0', 'Hot Dog!', '동물', T0); // 이미 asking 단계라 무시되는지도 함께 확인
     expect(room.secret).toBe('고양이');
     expect(g.submitGuess(room, 'p1', ' 고 양 이 ', T0).correct).toBe(true);
   });
@@ -184,7 +225,7 @@ describe('라운드 진행과 종료', () => {
     g.startGame(room, 'p0', T0);
     for (const id of ['p0', 'p1', 'p2']) {
       expect(room.answererId).toBe(id);
-      g.setSecret(room, id, '단어', T0);
+      g.setSecret(room, id, '단어', '동물', T0);
       g.endRound(room, 'timeout', T0);
       g.nextRound(room, 'p0', T0);
     }
@@ -207,7 +248,7 @@ describe('라운드 진행과 종료', () => {
     expect(room.answererId).toBe('p1');
 
     // 질문 시간이 다 되면 출제자 2점
-    g.setSecret(room, 'p1', '단어', t1);
+    g.setSecret(room, 'p1', '단어', '동물', t1);
     expect(g.tick(room, t1 + g.ROUND_SECONDS * 1000)).toBe(true);
     expect(room.lastResult.reason).toBe('timeout');
     expect(g.findPlayer(room, 'p1').score).toBe(2);
@@ -216,7 +257,7 @@ describe('라운드 진행과 종료', () => {
   it('게임이 끝나면 방장이 같은 사람들과 다시 시작할 수 있다', () => {
     const room = roomWith(2);
     g.startGame(room, 'p0', T0);
-    g.setSecret(room, 'p0', '고양이', T0);
+    g.setSecret(room, 'p0', '고양이', '동물', T0);
     g.submitGuess(room, 'p1', '고양이', T0);
     g.endGame(room);
     expect(g.restart(room, 'p1').ok).toBe(false);
@@ -302,7 +343,7 @@ describe('접속이 끊길 때', () => {
   it('게임 중에는 자리를 남겨 두고, 같은 토큰으로 돌아올 수 있다', () => {
     const room = roomWith(3);
     g.startGame(room, 'p0', T0);
-    g.setSecret(room, 'p0', '고양이', T0);
+    g.setSecret(room, 'p0', '고양이', '동물', T0);
     g.disconnect(room, 'p1', T0);
     expect(g.findPlayer(room, 'p1').connected).toBe(false);
     expect(room.phase).toBe('asking'); // 추측자 한 명이 빠져도 계속된다
@@ -315,7 +356,7 @@ describe('접속이 끊길 때', () => {
   it('출제자가 나가면 그 라운드는 무효가 된다', () => {
     const room = roomWith(3);
     g.startGame(room, 'p0', T0);
-    g.setSecret(room, 'p0', '고양이', T0);
+    g.setSecret(room, 'p0', '고양이', '동물', T0);
     g.disconnect(room, 'p0', T0);
     expect(room.phase).toBe('roundEnd');
     expect(room.lastResult.reason).toBe('answererLeft');
@@ -325,7 +366,7 @@ describe('접속이 끊길 때', () => {
   it('남은 인원이 2명 미만이면 게임이 끝난다', () => {
     const room = roomWith(2);
     g.startGame(room, 'p0', T0);
-    g.setSecret(room, 'p0', '고양이', T0);
+    g.setSecret(room, 'p0', '고양이', '동물', T0);
     g.disconnect(room, 'p1', T0);
     expect(room.phase).toBe('gameEnd');
   });
@@ -373,7 +414,7 @@ describe('고정 방 목록', () => {
   it('초기화하면 이름과 번호는 유지한 채 빈 대기실이 된다', () => {
     const room = roomWith(3);
     g.startGame(room, 'p0', T0);
-    g.setSecret(room, 'p0', '고양이', T0);
+    g.setSecret(room, 'p0', '고양이', '동물', T0);
     g.resetRoom(room, T0);
 
     expect(g.summary(room)).toMatchObject({ code: 'TEST', players: 0, phase: 'lobby', joinable: true });
