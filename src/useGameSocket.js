@@ -8,7 +8,7 @@ const socketUrl = () => {
   return `${protocol}//${window.location.host}/ws`;
 };
 
-// 새로고침해도 같은 자리로 돌아오기 위한 좌석 토큰
+// 새로고침해도 같은 자리로 돌아오기 위한 좌석 토큰. 서버는 끊긴 자리를 몇 초 잡아 두므로 게임 중이어도 그대로 이어진다.
 function loadSeat() {
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
@@ -126,7 +126,9 @@ export function useGameSocket() {
       /* 무시 */
     }
     setState(null);
-    socketRef.current?.close(); // 재연결되지만 입장 요청은 보내지 않는다
+    // 연결은 그대로 두고 서버에 알린다. 연결을 끊어 버리면 서버가 새로고침으로 보고 자리를 잠시 남겨 두기 때문.
+    const ws = socketRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'leave' }));
   }, []);
 
   const serverNow = useCallback(() => Date.now() + offsetRef.current, []);

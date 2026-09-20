@@ -7,9 +7,11 @@ import { RTC_DATA_MAX } from './rtc.js';
 let server;
 let url;
 const clients = new Set();
+const GRACE = 500; // 끊긴 자리를 비우기까지의 유예. 실제 기본값(5초)은 테스트를 느리게 하므로 줄인다.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 beforeAll(async () => {
-  server = createServer();
+  server = createServer({ reconnectGrace: GRACE });
   await new Promise((resolve) => server.listen(0, resolve));
   url = `ws://localhost:${server.address().port}/ws`;
 });
@@ -186,7 +188,7 @@ describe('WebSocket 서버 (고정 3개 방)', () => {
     [host, b, c].forEach((client) => client.close());
   });
 
-  it('끊긴 플레이어가 같은 토큰으로 돌아온다', async () => {
+  it('유예가 지나 끊김으로 표시된 뒤에도 같은 토큰으로 돌아온다', async () => {
     const a = await connect();
     const b = await connect();
     const c = await connect();
@@ -200,7 +202,7 @@ describe('WebSocket 서버 (고정 3개 방)', () => {
     await a.wait(isState('secret'));
 
     b.close();
-    await a.wait((m) => m.type === 'state' && m.state.players.some((p) => !p.connected));
+    await a.wait((m) => m.type === 'state' && m.state.players.some((p) => !p.connected)); // 유예(GRACE)가 지난 뒤
     expect(a.latest().phase).toBe('secret');
 
     const back = await connect();
@@ -297,7 +299,7 @@ describe('라이브채팅 (게임 상태와 분리)', () => {
     b.send({ type: 'chatHistory' });
     await b.wait(() => b.inbox.filter((m) => m.type === 'chatHistory').length === 2);
 
-    // 게임 중 끊겼다가 토큰으로 돌아온 사람도 받는다 (대기실에서는 자리가 사라지므로 게임을 먼저 시작)
+    // 게임 중 끊겼다가 토큰으로 돌아온 사람도 받는다
     await a.wait((m) => m.type === 'state' && m.state.players.length === 2);
     a.send({ type: 'start' });
     await b.wait(isState('secret'));
@@ -398,5 +400,100 @@ describe('음성 (시그널링 릴레이)', () => {
     expect(latestVoice(a).members).toEqual([{ id: aId, name: '가' }]);
 
     [a, back].forEach((client) => client.close());
+  });
+});
+
+describe('새로고침(F5) 좌석 유예', () => {
+  it('게임 중 잠시 끊겼다 같은 토큰으로 돌아오면 게임이 그대로 이어진다 (2명·방장·출제자여도)', async () => {
+    const a = await connect();
+    const b = await connect();
+    a.send({ type: 'join', code: '1', name: '방장' });
+    b.send({ type: 'join', code: '1', name: '손님' });
+    const aId = (await a.wait((m) => m.type === 'joined')).playerId;
+    await a.wait((m) => m.type === 'state' && m.state.players.length === 2);
+    a.send({ type: 'start' });
+    await b.wait(isState('secret'));
+    expect(b.latest()).toMatchObject({ hostId: aId, answererId: aId });
+
+    // 방장이자 출제자인 a가 새로고침: 연결이 끊기고 곧 새 연결이 같은 토큰으로 들어온다.
+    // 예전에는 이 순간 출제자 이탈로 라운드가 무효가 되고, 2명이라 인원 부족으로 게임까지 끝났다.
+    a.close();
+    const back = await connect();
+    back.send({ type: 'join', code: '1', token: aId });
+    const view = (await back.wait(isState('secret'))).state;
+    expect(view).toMatchObject({ you: aId, hostId: aId, answererId: aId, round: 1 });
+    expect(view.players.every((p) => p.connected)).toBe(true);
+
+    // 남아 있던 b는 끊김·라운드 무효·게임 종료 중 어느 것도 보지 못했다
+    const seen = b.inbox.filter((m) => m.type === 'state').map((m) => m.state);
+    expect(seen.every((s) => s.phase === 'lobby' || s.phase === 'secret')).toBe(true);
+    expect(seen.every((s) => s.players.every((p) => p.connected))).toBe(true);
+
+    // 유예가 지나도 자리는 그대로다 (비우기 예약이 취소되었는지)
+    await sleep(GRACE + 200);
+    expect(b.latest().phase).toBe('secret');
+    expect(b.latest().players.every((p) => p.connected)).toBe(true);
+
+    [b, back].forEach((c) => c.close());
+  });
+
+  it('대기실에서 새로고침해도 같은 자리(방장)로 돌아온다', async () => {
+    const a = await connect();
+    a.send({ type: 'join', code: '2', name: '혼자' });
+    const aId = (await a.wait((m) => m.type === 'joined')).playerId;
+    a.close();
+
+    const back = await connect();
+    back.send({ type: 'join', code: '2', token: aId });
+    const view = (await back.wait(isState('lobby'))).state;
+    expect(view.you).toBe(aId);
+    expect(view.hostId).toBe(aId);
+    expect(view.players).toEqual([expect.objectContaining({ id: aId, name: '혼자', connected: true })]);
+    back.close();
+  });
+
+  it('유예 안에 돌아오지 않으면 그때 자리를 비우고, 비워진 자리의 토큰은 거절한다', async () => {
+    const a = await connect();
+    const b = await connect();
+    a.send({ type: 'join', code: '3', name: '갈사람' });
+    b.send({ type: 'join', code: '3', name: '남을사람' });
+    const aId = (await a.wait((m) => m.type === 'joined')).playerId;
+    await b.wait((m) => m.type === 'state' && m.state.players.length === 2);
+
+    a.close();
+    await sleep(GRACE / 3);
+    expect(b.latest().players).toHaveLength(2); // 아직은 자리를 잡아 두고 있다
+    await b.wait((m) => m.type === 'state' && m.state.players.length === 1);
+
+    const late = await connect();
+    late.send({ type: 'join', code: '3', token: aId });
+    const error = await late.wait((m) => m.type === 'error');
+    expect(error).toMatchObject({ fatal: true, message: expect.stringContaining('비워졌습니다') });
+
+    [b, late].forEach((c) => c.close());
+  });
+
+  it('나가기는 유예 없이 바로 자리를 비우고, 연결을 유지한 채 방 목록으로 돌아간다', async () => {
+    const a = await connect();
+    const b = await connect();
+    a.send({ type: 'join', code: '1', name: '가' });
+    b.send({ type: 'join', code: '1', name: '나' });
+    await a.wait((m) => m.type === 'state' && m.state.players.length === 2);
+    a.send({ type: 'voice', on: true });
+    await b.wait((m) => m.type === 'voice' && m.members.length === 1);
+
+    const mark = a.inbox.length;
+    a.send({ type: 'leave' });
+    await b.wait((m) => m.type === 'state' && m.state.players.length === 1);
+    await b.wait((m) => m.type === 'voice' && m.members.length === 0); // 음성에서도 바로 빠진다
+    const rows = (await a.wait((m) => a.inbox.indexOf(m) >= mark && m.type === 'rooms')).rooms;
+    expect(rows.find((r) => r.code === '1')).toMatchObject({ players: 1, joinable: true });
+
+    // 같은 닉네임으로 곧바로 다시 들어갈 수 있다 (자리가 정말 비워졌다)
+    a.send({ type: 'join', code: '1', name: '가' });
+    await a.wait((m) => a.inbox.indexOf(m) >= mark && m.type === 'state' && m.state.players.length === 2);
+    expect(a.inbox.filter((m) => m.type === 'error')).toEqual([]);
+
+    [a, b].forEach((c) => c.close());
   });
 });

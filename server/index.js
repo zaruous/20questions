@@ -1,6 +1,6 @@
 // WebSocket 서버 (I/O 계층).
 // 게임 규칙은 game.js, 라이브채팅은 chat.js, 음성 참여자·시그널링 규칙은 rtc.js에 있고,
-// 여기서는 연결/방 목록/브로드캐스트/시간만 다룬다.
+// 여기서는 연결/방 목록/브로드캐스트/시간, 그리고 끊긴 연결의 자리를 잠시 잡아 두는 일(새로고침 대비)만 다룬다.
 import http from 'node:http';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -15,6 +15,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 3001);
 const ROOM_COUNT = Number(process.env.ROOM_COUNT ?? 3); // 서버가 여는 방의 개수(고정)
 const EMPTY_ROOM_RESET = 60 * 1000; // 아무도 없는 방을 대기실로 되돌리기까지
+/**
+ * 연결이 끊긴 사람의 자리를 비우기까지 기다리는 시간.
+ * 새로고침(F5)·순간 끊김은 이 안에 같은 토큰으로 돌아오므로, 그동안 게임은 아무 일도 없던 것처럼 이어진다.
+ */
+export const RECONNECT_GRACE_MS = Number(process.env.RECONNECT_GRACE_MS ?? 5000);
 export const WS_DATA_MAX = 32 * 1024; // JSON 파싱 전에 막는 클라이언트 요청 전체 크기 상한
 
 /** 서버 시작 시 방을 미리 만들어 두고, 이후로는 생성/삭제하지 않는다. */
@@ -31,6 +36,8 @@ const chatHistoryOf = (code) => ({ type: 'chatHistory', messages: chats.get(code
 const voices = new Map([...rooms.keys()].map((code) => [code, rtc.createVoice()]));
 /** @type {Map<import('ws').WebSocket, {roomCode: string, playerId: string, name: string}>} */
 const sessions = new Map();
+/** 연결은 끊겼지만 아직 자리를 비우지 않은 사람. playerId → 자리를 비우는 타이머 */
+const pendingLeaves = new Map();
 
 /** 음성 참여자 목록. 이름은 게임 상태가 아니라 세션에서 가져온다. */
 function voiceStateOf(code) {
@@ -162,6 +169,40 @@ function handle(ws, session, msg) {
   publish(room);
 }
 
+/** 자리를 비운다. 뒤처리(방장 승계·라운드 무효·인원 부족 종료)는 게임 규칙이 하고, 대기실이 비면 채팅·음성도 함께 비운다. */
+function vacate(room, playerId) {
+  game.disconnect(room, playerId, Date.now());
+  // 대기실이 비면 채팅·음성도 바로 비운다 — 다음에 들어오는 다른 사람들에게 이전 대화가 보이지 않게.
+  if (room.phase === 'lobby' && game.connectedPlayers(room).length === 0) resetSocial(room.code);
+  publish(room);
+}
+
+/** 연결만 끊긴 사람의 자리를 잠시 잡아 둔다. 유예 안에 같은 토큰으로 돌아오지 않으면 그때 비운다. */
+function holdSeat(room, playerId, grace) {
+  clearTimeout(pendingLeaves.get(playerId));
+  const timer = setTimeout(() => {
+    pendingLeaves.delete(playerId);
+    vacate(room, playerId);
+  }, grace);
+  timer.unref?.();
+  pendingLeaves.set(playerId, timer);
+}
+
+/** 돌아온 사람의 자리 비우기 예약을 취소한다. */
+function releaseSeat(playerId) {
+  clearTimeout(pendingLeaves.get(playerId));
+  pendingLeaves.delete(playerId);
+}
+
+/** '나가기'. 새로고침과 달리 돌아올 사람이 아니므로 바로 자리를 비운다. 연결은 그대로 두어 첫 화면(방 목록)으로 돌아간다. */
+function handleLeave(ws, session) {
+  sessions.delete(ws);
+  const room = rooms.get(session.roomCode);
+  if (!room) return;
+  if (rtc.leave(voices.get(room.code), session.playerId)) broadcastRoom(room.code, voiceStateOf(room.code));
+  vacate(room, session.playerId); // publish → broadcastLobby가 이 연결에도 방 목록을 다시 보낸다
+}
+
 function handleEntry(ws, msg) {
   const name = String(msg.name ?? '').trim();
   const reject = (message) => fail(ws, message, true);
@@ -171,13 +212,16 @@ function handleEntry(ws, msg) {
   if (!room) return reject('그런 방이 없습니다.');
 
   // 토큰을 가진 사람은 게임 중이어도 자기 자리로 돌아올 수 있다.
-  if (msg.token && game.findPlayer(room, msg.token)) {
+  if (msg.token) {
+    if (!game.findPlayer(room, msg.token)) return reject('이전 자리가 이미 비워졌습니다. 다시 입장해 주세요.');
+    // 같은 토큰의 다른 연결(다른 탭)이 살아 있으면 밀어낸다.
     for (const [otherWs, other] of sessions) {
       if (other.playerId === msg.token && otherWs !== ws) {
         sessions.delete(otherWs);
         otherWs.close();
       }
     }
+    releaseSeat(msg.token); // 새로고침으로 잠시 끊겼던 자리라면 비우기 예약을 취소한다
     const back = game.reconnect(room, msg.token);
     if (!back.ok) return reject(back.error);
     // 새 페이지는 이전 페이지의 음성 연결을 이어받을 수 없다. 참여 중이었다면 빠진 것으로 하고 남은 사람들에게 알린다.
@@ -202,13 +246,15 @@ function handleEntry(ws, msg) {
 
 /** 테스트 전용: 모든 방을 빈 대기실로 되돌린다. 방이 고정이라 테스트끼리 상태가 섞이기 때문. */
 export function resetRooms() {
+  for (const timer of pendingLeaves.values()) clearTimeout(timer);
+  pendingLeaves.clear();
   for (const room of rooms.values()) {
     game.resetRoom(room);
     resetSocial(room.code);
   }
 }
 
-export function createServer() {
+export function createServer({ reconnectGrace = RECONNECT_GRACE_MS } = {}) {
   const app = express();
   const dist = path.join(__dirname, '..', 'dist');
   app.use(express.static(dist));
@@ -241,6 +287,7 @@ export function createServer() {
         if (msg.type === 'join') return handleEntry(ws, msg);
         return fail(ws, '먼저 방에 입장하세요.', true);
       }
+      if (msg.type === 'leave') return handleLeave(ws, session);
       if (msg.type === 'chat' || msg.type === 'chatHistory') return handleChat(ws, session, msg);
       if (msg.type === 'voice' || msg.type === 'voiceState' || msg.type === 'rtc') return handleVoice(ws, session, msg);
       handle(ws, session, msg);
@@ -253,12 +300,10 @@ export function createServer() {
       if (!session) return;
       const room = rooms.get(session.roomCode);
       if (!room) return;
-      // 연결이 끊긴 사람은 음성에서도 빠진다. 남은 사람들이 그 사람과의 피어 연결을 닫을 수 있게 알린다.
+      // 음성은 연결과 함께 끝난다(새 페이지는 이전 피어 연결을 이어받을 수 없다). 남은 사람들이 그 사람과의 연결을 닫게 알린다.
       if (rtc.leave(voices.get(room.code), session.playerId)) broadcastRoom(room.code, voiceStateOf(room.code));
-      game.disconnect(room, session.playerId, Date.now());
-      // 대기실이 비면 채팅·음성도 바로 비운다 — 다음에 들어오는 다른 사람들에게 이전 대화가 보이지 않게.
-      if (room.phase === 'lobby' && game.connectedPlayers(room).length === 0) resetSocial(room.code);
-      publish(room);
+      // 자리는 바로 비우지 않는다. 새로고침(F5)·순간 끊김이면 곧 같은 토큰으로 돌아오고, 그동안 게임은 그대로 이어진다.
+      holdSeat(room, session.playerId, reconnectGrace);
     });
   });
 
@@ -287,6 +332,8 @@ export function createServer() {
 
   server.on('close', () => {
     clearInterval(timer);
+    for (const pending of pendingLeaves.values()) clearTimeout(pending);
+    pendingLeaves.clear();
     wss.close();
   });
   return server;

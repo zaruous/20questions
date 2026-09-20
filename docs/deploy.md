@@ -71,6 +71,7 @@ Vite 개발 서버(5173)는 외부 도메인 접근을 차단하므로 터널 �
 | --- | --- | --- |
 | `PORT` | `3001` | HTTP/WebSocket 포트 |
 | `ROOM_COUNT` | `3` | 서버가 열어 두는 방의 개수 |
+| `RECONNECT_GRACE_MS` | `5000` | 연결이 끊긴 자리를 비우기까지 기다리는 시간(ms). 새로고침·순간 끊김이면 이 안에 돌아와 게임이 이어진다 |
 | `VITE_TURN_URL` | 없음 | 음성 채팅용 TURN 서버 주소 (예: `turn:turn.example.com:3478`) |
 | `VITE_TURN_USERNAME` | 없음 | TURN 사용자 이름 |
 | `VITE_TURN_CREDENTIAL` | 없음 | TURN 비밀번호 |
