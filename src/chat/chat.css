@@ -1,5 +1,6 @@
 /* 라이브채팅. 색·간격 토큰은 styles.css의 것을 쓰고, 자리는 여기서 잡는다:
-   폰에서는 아래에서 올라오는 시트로 게임 화면을 덮고, 넓은 화면에서는 .game.has-chat이 비워둔 오른쪽 자리에 붙는다. */
+   폰에서는 아래에서 올라오는 시트로 게임 화면을 덮고, 넓은 화면에서는 .game.has-chat이 비워둔 오른쪽 자리에 붙는다.
+   두 경우 모두 뷰포트(fixed)가 아니라 게임 화면 상자(.game.has-chat, position: relative)에 앵커한다 — 아래 .chat 주석 참고. */
 
 .chat-toggle { position: relative; }
 .chat-toggle.is-on { border-color: var(--secondary); color: var(--secondary); }
@@ -21,14 +22,18 @@
 }
 
 .chat-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.45); }
+/* 폰: 게임 화면 바닥에 붙는 시트. position: fixed로 뷰포트 밑변에 붙이지 않는 이유 —
+   안드로이드(갤럭시) 크롬은 내비게이션 바·주소창·키보드에 따라 뷰포트 밑변이 움직이고, 그때 fixed 요소의 밑변과
+   safe-area 값이 어긋나 입력줄이 화면 밖으로 잘리는 일이 있었다. 게임 화면 상자(.game)에 앵커하면 게임의 바닥 입력줄과
+   정확히 같은 밑변·같은 safe-area 여백을 쓰므로, 채팅 입력줄은 항상 게임 입력줄과 똑같이 보인다. */
 .chat {
-  position: fixed;
+  position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 21;
-  height: 60vh;
-  height: 60dvh;
+  height: 60%;
+  min-height: 220px; /* 키보드가 올라와 화면이 낮아져도(interactive-widget=resizes-content) 머리줄·입력줄은 남긴다 */
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -112,6 +117,7 @@
     left: auto;
     width: 320px;
     height: auto;
+    min-height: 0;
     z-index: auto;
     border-bottom: 1px solid var(--line);
     border-radius: var(--radius);

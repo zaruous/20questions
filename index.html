@@ -2,7 +2,9 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- interactive-widget=resizes-content: 안드로이드 크롬에서 키보드가 올라오면 레이아웃 뷰포트(100dvh)도 함께 줄어들어
+         바닥 입력창(질문·정답·채팅)이 키보드 위에 남는다. 기본값(resizes-visual)은 화면만 밀어 올려 입력 중인 글자가 가려질 수 있다. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#14121f" />
     <title>20고개 · 실시간 멀티플레이</title>
     <!-- 제목용 둥근 서체(Jua)와 본문용 Pretendard. 둘 다 못 받아도 시스템 서체로 그대로 동작한다. -->

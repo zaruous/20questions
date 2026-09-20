@@ -41,7 +41,8 @@ button, input, label, summary { touch-action: manipulation; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 h1, h2, h3, .result__headline { text-wrap: balance; }
 
-/* 화면 하나가 뷰포트를 꽉 채우고, 스크롤은 안쪽에서만 일어난다(폰 주소창 변화에도 바닥 입력창이 붙어 있게). */
+/* 화면 하나가 뷰포트를 꽉 채우고, 스크롤은 안쪽에서만 일어난다(폰 주소창 변화에도 바닥 입력창이 붙어 있게).
+   키보드가 올라오면(index.html의 interactive-widget=resizes-content) 이 상자도 함께 줄어들어 바닥 입력창이 키보드 위에 남는다. */
 .app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
 
 .banner {
@@ -389,7 +390,9 @@ label.roster__card:hover { filter: brightness(1.08); }
   .lobby__room { font-size: 64px; }
 }
 
-/* 라이브채팅 패널(src/chat/chat.css)이 오른쪽에 붙을 자리. 패널은 .game 기준 absolute라 여기서는 폭만 비워둔다. */
+/* 라이브채팅 패널(src/chat/chat.css)은 .game 기준 absolute다: 폰에서는 바닥 시트, 넓은 화면에서는 오른쪽 열.
+   뷰포트가 아니라 이 상자에 앵커해야 게임의 바닥 입력줄과 같은 밑변·safe-area를 공유한다(폰 내비게이션 바·키보드 대응). */
+.game.has-chat { position: relative; }
 @media (min-width: 1024px) {
-  .game.has-chat { position: relative; max-width: 1340px; padding-right: calc(20px + 320px + 12px); }
+  .game.has-chat { max-width: 1340px; padding-right: calc(20px + 320px + 12px); }
 }
